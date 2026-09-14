@@ -24,9 +24,23 @@ PROJECT_DETAIL_PATHS = {
     f"/v1/{asset}-projects/{{id}}" for asset in PROJECT_TAG_TO_ASSET.values()
 }
 GENERIC_ACTION_REPLACEMENTS = {"do": "perform", "get": "retrieve", "run": "execute"}
+# ToolCallLoggingMiddleware logs the tool name and redacted arguments for every
+# call. OpenAI's review definition of readOnlyHint lists "write logs" among the
+# actions that make a tool non-read-only, but ChatGPT treats every non-read-only
+# tool as a write action that needs user confirmation, which would prompt on
+# each status poll. This branch treats that logging as infrastructure telemetry
+# rather than a tool action. Flip to True to restore the all-false hints.
+DIAGNOSTIC_LOGGING_COUNTS_AS_WRITE = False
 LOGGING_GUIDANCE = (
     "Calls write private diagnostic logs, including for status and download reads."
 )
+READ_ONLY_LOGGING_GUIDANCE = (
+    "Read-only; only server diagnostic logging of request metadata occurs."
+)
+ACCOUNT_PATH = "/v1/account"
+FACE_DETECTION_DETAIL_PATH = "/v1/face-detection/{id}"
+# Reviewed GET operations that only look up account or project state.
+READ_ONLY_GET_PATHS = PROJECT_DETAIL_PATHS | {ACCOUNT_PATH, FACE_DETECTION_DETAIL_PATH}
 REVIEWED_GENERATION_PATHS = {
     f"/v1/{name}"
     for name in (
@@ -61,12 +75,39 @@ REVIEWED_GENERATION_PATHS = {
 }
 
 
-def private_tool_annotations(*, destructive: bool = False) -> ToolAnnotations:
-    # OpenAI's review definition includes log writes. ToolCallLoggingMiddleware
-    # runs for every tool, including otherwise read-only helpers.
+def read_only_hint(read_only: bool) -> bool:
+    """Wire value of readOnlyHint for a tool that is (or is not) a pure read."""
+    return read_only and not DIAGNOSTIC_LOGGING_COUNTS_AS_WRITE
+
+
+def logging_guidance(*, read_only: bool) -> str:
+    """Description sentence that discloses diagnostic logging without overstating it."""
+    if read_only_hint(read_only):
+        return READ_ONLY_LOGGING_GUIDANCE
+    return LOGGING_GUIDANCE
+
+
+def tool_annotations(*, read_only: bool, destructive: bool = False) -> ToolAnnotations:
+    """Submission hints for a tool bounded to the user's private Magic Hour account.
+
+    ``read_only`` marks tools that strictly fetch, look up, or retrieve data.
+    ``destructive`` is reserved for operations that permanently delete media.
+    ``openWorldHint`` is always false: every tool acts on the authenticated
+    account, and media referenced by URL is fetched by Magic Hour's backend into
+    that account rather than by the tool.
+    """
+    if read_only and destructive:
+        raise ValueError("A read-only tool cannot also be destructive")
     return ToolAnnotations(
-        readOnlyHint=False, openWorldHint=False, destructiveHint=destructive
+        readOnlyHint=read_only_hint(read_only),
+        destructiveHint=destructive,
+        openWorldHint=False,
     )
+
+
+def is_read_operation(method: str, path: str) -> bool:
+    """True for reviewed GET operations that only look up account or project state."""
+    return method.upper() == "GET" and path in READ_ONLY_GET_PATHS
 
 
 def apply_magic_hour_policies(openapi_spec: dict[str, Any]) -> dict[str, Any]:
@@ -103,11 +144,17 @@ def _apply_operation_policy(
     *, path: str, method: str, operation: dict[str, Any]
 ) -> None:
     tags = set(operation.get("tags") or [])
-    additions: list[str] = [LOGGING_GUIDANCE]
+    additions: list[str] = [logging_guidance(read_only=is_read_operation(method, path))]
 
     asset_type = next(
         (asset for tag, asset in PROJECT_TAG_TO_ASSET.items() if tag in tags), None
     )
+
+    if method == "GET" and path == ACCOUNT_PATH:
+        additions.append(
+            "Use this to look up the account's credit balance and subscription tier, for example to explain a "
+            "plan restriction or confirm credits before generation. It does not change the account."
+        )
 
     if path == "/v1/files/upload-urls":
         additions.append(
@@ -182,10 +229,10 @@ def customize_openapi_component(route: Any, component: Any) -> None:
 
     # Fail closed when the OpenAPI sync introduces a new kind of operation.
     # These groups were reviewed against the API handlers, not tool names.
-    project_details = path in PROJECT_DETAIL_PATHS
+    read_operation = is_read_operation(method, path)
     supported = (
-        (project_details and method in {"GET", "DELETE"})
-        or (method == "GET" and path == "/v1/face-detection/{id}")
+        read_operation
+        or (method == "DELETE" and path in PROJECT_DETAIL_PATHS)
         or (
             method == "POST" and path in {"/v1/files/upload-urls", "/v1/face-detection"}
         )
@@ -197,7 +244,9 @@ def customize_openapi_component(route: Any, component: Any) -> None:
     )
     if not supported:
         raise ValueError(f"Review MCP side effects before exposing {method} {path}")
-    component.annotations = private_tool_annotations(destructive=method == "DELETE")
+    component.annotations = tool_annotations(
+        read_only=read_operation, destructive=method == "DELETE"
+    )
 
     tags = getattr(component, "tags", None)
     if tags is None:

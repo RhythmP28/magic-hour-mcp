@@ -1,8 +1,10 @@
 import json
+import os
 import re
 import unittest
 from html import escape
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 import httpx
@@ -17,17 +19,22 @@ from mcp_magichour.openapi_server import (
     MCP_APP_VIEW_CSP,
     MCP_APP_VIEW_PATH,
     MCP_APP_VIEW_URI,
+    MCP_APP_WIDGET_DOMAIN,
     MCP_SERVER_CARD_PATH,
     MCP_SERVER_DESCRIPTION,
     MCP_SERVER_NAME,
     MCP_SERVER_URL,
     MCP_SERVER_VERSION,
+    OPENAI_APPS_CHALLENGE_ENV,
+    OPENAI_APPS_CHALLENGE_PATH,
     app,
 )
 
 EXPECTED_MCP_SERVER_INSTRUCTIONS = """
 Create and edit images, video, and audio with Magic Hour.
 Tool calls require authentication.
+Only create or edit media when the user requests execution. Ideas, writing, prompts, and how-to questions alone do not authorize generation.
+Never repeat a create call to poll progress. Reuse its returned project id.
 Creation tools are asynchronous; use the matching wait_for_*_project tool after starting a project.
 Upload local media before passing its file_path, and preserve signed download URLs exactly as returned.
 Omit optional resolution and model unless the user explicitly requests them, allowing the API to choose plan-compatible defaults.
@@ -180,6 +187,50 @@ class ChatGPTDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("www-authenticate", response.headers)
 
+    def test_widget_domain_defaults_to_app_origin(self):
+        self.assertEqual(
+            MCP_APP_WIDGET_DOMAIN,
+            os.getenv("MCP_APP_WIDGET_DOMAIN", MCP_APP_ORIGIN).rstrip("/"),
+        )
+        self.assertEqual(urlparse(MCP_APP_WIDGET_DOMAIN).scheme, "https")
+        self.assertFalse(MCP_APP_WIDGET_DOMAIN.endswith("/"))
+
+    async def test_openai_apps_challenge_serves_token_from_environment_per_request(self):
+        self.assertEqual(OPENAI_APPS_CHALLENGE_PATH, "/.well-known/openai-apps-challenge")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="https://mcp.example",
+        ) as client:
+            with patch.dict(os.environ, {OPENAI_APPS_CHALLENGE_ENV: "  first-token \n"}):
+                first = await client.get(OPENAI_APPS_CHALLENGE_PATH)
+            with patch.dict(os.environ, {OPENAI_APPS_CHALLENGE_ENV: "second-token"}):
+                second = await client.get(OPENAI_APPS_CHALLENGE_PATH)
+
+        for response, token in ((first, "first-token"), (second, "second-token")):
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.text, token)
+            self.assertEqual(response.headers["content-type"], "text/plain; charset=utf-8")
+            self.assertEqual(response.headers["cache-control"], "no-store")
+            self.assertNotIn("www-authenticate", response.headers)
+
+    async def test_openai_apps_challenge_is_not_found_until_configured(self):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="https://mcp.example",
+        ) as client:
+            with patch.dict(os.environ):
+                os.environ.pop(OPENAI_APPS_CHALLENGE_ENV, None)
+                unset = await client.get(OPENAI_APPS_CHALLENGE_PATH)
+            with patch.dict(os.environ, {OPENAI_APPS_CHALLENGE_ENV: " \t\n"}):
+                blank = await client.get(OPENAI_APPS_CHALLENGE_PATH)
+
+        for response in (unset, blank):
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.text, "not configured")
+            self.assertEqual(response.headers["content-type"], "text/plain; charset=utf-8")
+            self.assertEqual(response.headers["cache-control"], "no-store")
+            self.assertNotIn("www-authenticate", response.headers)
+
     async def assert_discovery_and_auth(self, client: httpx.AsyncClient):
         initialized = await client.post(
             "/",
@@ -234,6 +285,8 @@ class ChatGPTDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         resources = self.result(listed_resources)["resources"]
         view = next(resource for resource in resources if resource["uri"] == MCP_APP_VIEW_URI)
         self.assertEqual(view["mimeType"], "text/html;profile=mcp-app")
+        self.assertEqual(view["_meta"]["ui"]["domain"], MCP_APP_WIDGET_DOMAIN)
+        self.assertEqual(view["_meta"]["openai/widgetDomain"], MCP_APP_WIDGET_DOMAIN)
 
         read_view = await client.post(
             "/",
@@ -255,6 +308,8 @@ class ChatGPTDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertTrue(view_content["_meta"]["ui"]["prefersBorder"])
+        self.assertEqual(view_content["_meta"]["ui"]["domain"], MCP_APP_WIDGET_DOMAIN)
+        self.assertEqual(view_content["_meta"]["openai/widgetDomain"], MCP_APP_WIDGET_DOMAIN)
         self.assertTrue(view_content["text"].startswith("<!DOCTYPE html>"))
         self.assertIn(
             f'<meta http-equiv="Content-Security-Policy" content="{escape(MCP_APP_VIEW_CSP, quote=False)}">',

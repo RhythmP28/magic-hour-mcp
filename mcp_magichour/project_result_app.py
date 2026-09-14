@@ -10,6 +10,9 @@ MCP_APP_ORIGIN = os.getenv(
     "MCP_APP_ORIGIN",
     f"https://{os.getenv('VERCEL_URL', 'mcp.magichour.ai')}",
 ).rstrip("/")
+# Origin that hosts the widget iframe. Emitted as `_meta.ui.domain` (MCP Apps)
+# and `_meta["openai/widgetDomain"]` (ChatGPT Apps SDK) on the result resource.
+MCP_APP_WIDGET_DOMAIN = os.getenv("MCP_APP_WIDGET_DOMAIN", MCP_APP_ORIGIN).rstrip("/")
 MCP_APP_MEDIA_ORIGIN = "https://videos.magichour.ai"
 MCP_APP_DIST_PATH = Path(__file__).with_name("static") / "project-result"
 MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"

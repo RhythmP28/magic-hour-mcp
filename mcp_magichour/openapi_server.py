@@ -19,7 +19,7 @@ from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -28,10 +28,10 @@ from .openapi_auth import BearerPassthroughAuth, BearerPassthroughMiddleware, cu
 from .mcp_errors import install_structured_tool_errors
 from .oauth_compat import MCPToolOAuthMiddleware, create_oauth_compatibility_app
 from .openapi_policies import (
-    LOGGING_GUIDANCE,
     apply_magic_hour_policies,
     customize_openapi_component,
-    private_tool_annotations,
+    logging_guidance,
+    tool_annotations,
 )
 from .posthog_client import PostHogFlushMiddleware, analytics
 from .project_result_app import (
@@ -44,6 +44,7 @@ from .project_result_app import (
     MCP_APP_VIEW_CSP,
     MCP_APP_VIEW_PATH,
     MCP_APP_VIEW_URI,
+    MCP_APP_WIDGET_DOMAIN,
     read_mcp_app_html,
 )
 from .tool_logging import ToolCallLoggingMiddleware
@@ -82,6 +83,8 @@ For video creation, unless the user requests otherwise:
   """.strip()
 MCP_SERVER_CARD_PATH = "/.well-known/mcp/server-card.json"
 GLAMA_VERIFICATION_PATH = "/.well-known/glama.json"
+OPENAI_APPS_CHALLENGE_PATH = "/.well-known/openai-apps-challenge"
+OPENAI_APPS_CHALLENGE_ENV = "OPENAI_APPS_CHALLENGE_TOKEN"
 MCP_SERVER_DESCRIPTION = "Create and edit images, video, and audio with Magic Hour."
 MCP_SERVER_URL = "https://mcp.magichour.ai/"
 TERMINAL_PROJECT_STATUSES = {"complete", "error", "canceled"}
@@ -180,27 +183,33 @@ def register_custom_tools(mcp: FastMCP) -> None:
                 connect_domains=[MCP_APP_SERVER_ORIGIN, MCP_APP_ORIGIN],
                 resource_domains=[MCP_APP_ORIGIN, MCP_APP_MEDIA_ORIGIN],
             ),
+            domain=MCP_APP_WIDGET_DOMAIN,
             prefers_border=True,
         ),
+        # fastmcp emits the MCP Apps form as `_meta.ui.domain`; ChatGPT's Apps SDK
+        # reads the same origin from this alias. Both are merged into one `_meta`.
+        meta={"openai/widgetDomain": MCP_APP_WIDGET_DOMAIN},
     )
     def mcp_app_view() -> str:
         return read_mcp_app_html()
 
+    read_only_guidance = logging_guidance(read_only=True)
+
     @mcp.tool(
         name="ping",
-        description=f"Check that the Magic Hour MCP server is reachable; returns pong. {LOGGING_GUIDANCE}",
-        annotations=private_tool_annotations(),
+        description=f"Check that the Magic Hour MCP server is reachable; returns pong. {read_only_guidance}",
+        annotations=tool_annotations(read_only=True),
     )
     def ping() -> str:
         return "pong"
 
     @mcp.tool(
         name="wait_for_video_project",
-        annotations=private_tool_annotations(),
+        annotations=tool_annotations(read_only=True),
         output_schema=PROJECT_RESULT_SCHEMA,
         description=(
             "Poll a video project until it completes, errors, is canceled, or times out. "
-            f"{SIGNED_DOWNLOAD_GUIDANCE} {LOGGING_GUIDANCE} Does not start a generation or charge credits."
+            f"{SIGNED_DOWNLOAD_GUIDANCE} {read_only_guidance} Does not start a generation or charge credits."
         ),
         app=AppConfig(resource_uri=MCP_APP_VIEW_URI),
     )
@@ -222,12 +231,12 @@ def register_custom_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="wait_for_image_project",
-        annotations=private_tool_annotations(),
+        annotations=tool_annotations(read_only=True),
         output_schema=PROJECT_RESULT_SCHEMA,
         description=(
             "Poll an image project until it completes, errors, is canceled, or times out. Returns the final "
             "project JSON and, when complete, attempts to inline image downloads for Inspector or compatible "
-            f"clients. {SIGNED_DOWNLOAD_GUIDANCE} {LOGGING_GUIDANCE} Does not start a generation or charge credits."
+            f"clients. {SIGNED_DOWNLOAD_GUIDANCE} {read_only_guidance} Does not start a generation or charge credits."
         ),
         app=AppConfig(resource_uri=MCP_APP_VIEW_URI),
     )
@@ -251,12 +260,12 @@ def register_custom_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="wait_for_audio_project",
-        annotations=private_tool_annotations(),
+        annotations=tool_annotations(read_only=True),
         output_schema=PROJECT_RESULT_SCHEMA,
         description=(
             "Poll an audio project until it completes, errors, is canceled, or times out. Returns the final "
             "project JSON and, when complete, attempts to inline audio downloads for Inspector or compatible "
-            f"clients. {SIGNED_DOWNLOAD_GUIDANCE} {LOGGING_GUIDANCE} Does not start a generation or charge credits."
+            f"clients. {SIGNED_DOWNLOAD_GUIDANCE} {read_only_guidance} Does not start a generation or charge credits."
         ),
         app=AppConfig(resource_uri=MCP_APP_VIEW_URI),
     )
@@ -298,8 +307,10 @@ def _register_media_fetch_tool(mcp: FastMCP, media_type: ProjectType) -> None:
 
     @mcp.tool(
         name=tool_name,
-        description=f"{description} {LOGGING_GUIDANCE} Does not start a generation or charge credits.",
-        annotations=private_tool_annotations(),
+        description=(
+            f"{description} {logging_guidance(read_only=True)} Does not start a generation or charge credits."
+        ),
+        annotations=tool_annotations(read_only=True),
     )
     async def fetch_download(
         download_url: str, max_bytes: int = DEFAULT_MEDIA_FETCH_MAX_BYTES
@@ -705,6 +716,19 @@ async def glama_verification(_: Request) -> JSONResponse:
     )
 
 
+async def openai_apps_challenge(_: Request) -> PlainTextResponse:
+    """Serve the OpenAI Apps domain-verification token as the whole response body.
+
+    The token is read per request so it can be rotated without a restart, and it
+    is never stored in source. Unset or blank means the check is not configured.
+    """
+    token = os.environ.get(OPENAI_APPS_CHALLENGE_ENV, "").strip()
+    headers = {"Cache-Control": "no-store"}
+    if not token:
+        return PlainTextResponse("not configured", status_code=404, headers=headers)
+    return PlainTextResponse(token, headers=headers)
+
+
 mcp_app_assets = CORSMiddleware(
     StaticFiles(directory=MCP_APP_DIST_PATH, check_dir=False),
     allow_origins=["*"],
@@ -720,6 +744,7 @@ app = create_oauth_compatibility_app(
         Mount(MCP_APP_ASSET_PATH, app=mcp_app_assets),
         Route(MCP_SERVER_CARD_PATH, mcp_server_card, methods=["GET"]),
         Route(GLAMA_VERIFICATION_PATH, glama_verification, methods=["GET"]),
+        Route(OPENAI_APPS_CHALLENGE_PATH, openai_apps_challenge, methods=["GET"]),
     ],
 )
 lifespan = app.router.lifespan_context

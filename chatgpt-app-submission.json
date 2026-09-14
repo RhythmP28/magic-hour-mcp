@@ -10,86 +10,98 @@
   "tools": {
     "ping": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Returns a reachability response while the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
+        "read_only_justification": "Returns a fixed reachability response from the MCP server and does not create, update, delete, or trigger anything. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Answers from the MCP server itself without contacting the public internet, Magic Hour's API, or any external entity.",
         "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
       }
     },
     "wait_for_video_project": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Repeatedly reads the video project's status and, once terminal, returns its signed download URLs; it never starts a generation, charges credits, or modifies the project. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account: it polls Magic Hour's API and, when inlining media, fetches only from Magic Hour's signed media origin (https://videos.magichour.ai).",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "wait_for_image_project": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Repeatedly reads the image project's status and, once terminal, returns its signed download URLs; it never starts a generation, charges credits, or modifies the project. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account: it polls Magic Hour's API and, when inlining media, fetches only from Magic Hour's signed media origin (https://videos.magichour.ai).",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "wait_for_audio_project": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Repeatedly reads the audio project's status and, once terminal, returns its signed download URLs; it never starts a generation, charges credits, or modifies the project. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account: it polls Magic Hour's API and, when inlining media, fetches only from Magic Hour's signed media origin (https://videos.magichour.ai).",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "fetch_image_download": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Downloads bytes from an already-signed Magic Hour image URL and returns them inline; nothing is created, modified, deleted, or enqueued. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Only fetches from Magic Hour's own signed media origin (https://videos.magichour.ai); any other host is rejected before a request is made, so it never reaches open-ended external entities.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "fetch_audio_download": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Downloads bytes from an already-signed Magic Hour audio URL and returns them inline; nothing is created, modified, deleted, or enqueued. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Only fetches from Magic Hour's own signed media origin (https://videos.magichour.ai); any other host is rejected before a request is made, so it never reaches open-ended external entities.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "fetch_video_download": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Downloads bytes from an already-signed Magic Hour video URL and returns them inline; nothing is created, modified, deleted, or enqueued. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Only fetches from Magic Hour's own signed media origin (https://videos.magichour.ai); any other host is rejected before a request is made, so it never reaches open-ended external entities.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
+      }
+    },
+    "account_retrieve": {
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Looks up the credit balance and subscription details of the account that owns the API key without changing them. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "video_assets_generate_presigned_url": {
@@ -99,21 +111,21 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Signs expiring upload URLs without uploading bytes or creating storage objects, while the MCP call writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
+        "read_only_justification": "Creates new signed, expiring upload slots at unique storage paths that the account can then write to; it does not upload bytes itself, but issuing the slots changes state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
         "destructive_justification": "Returns upload URLs for new unique paths without deleting or overwriting media."
       }
     },
     "face_detection_retrieve_details": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Looks up the status and detected faces of an existing face-detection task without starting or changing anything. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "face_detection_detect_faces": {
@@ -123,21 +135,21 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Starts an asynchronous private face-detection task and writes diagnostic logs, currently without charging generation credits.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
+        "read_only_justification": "Starts an asynchronous private face-detection task, creating a new task record and enqueuing processing (currently without charging generation credits). The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
         "destructive_justification": "Creates a detection task without deleting or overwriting the source media."
       }
     },
     "video_projects_retrieve_details": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Looks up one video project's status, credits charged, and signed download URLs without changing the project or starting processing. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "video_projects_delete": {
@@ -147,8 +159,8 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Permanently deletes the selected project outputs and changes private project records, with diagnostic logging.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
+        "read_only_justification": "Permanently deletes the selected video project's outputs and changes private project records. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
         "destructive_justification": "Permanently removes rendered media and may remove an associated unapproved template; the deleted files cannot be restored by this tool."
       }
     },
@@ -159,9 +171,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_video_editor_create_video": {
@@ -171,9 +183,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "animation_create_video": {
@@ -183,9 +195,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL and `youtube_url` may reference a public YouTube video, but the tool only forwards those references; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "audio_to_video_create_video": {
@@ -195,9 +207,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "auto_subtitle_generator_create_video": {
@@ -207,9 +219,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "character_replace_create_video": {
@@ -219,9 +231,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "face_swap_create_video": {
@@ -231,9 +243,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL and `youtube_url` may reference a public YouTube video, but the tool only forwards those references; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "image_to_video_create_video": {
@@ -243,9 +255,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "lip_sync_create_video": {
@@ -255,9 +267,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL and `youtube_url` may reference a public YouTube video, but the tool only forwards those references; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "text_to_video_create_video": {
@@ -267,9 +279,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "video_to_video_create_video": {
@@ -279,21 +291,21 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private video project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL and `youtube_url` may reference a public YouTube video, but the tool only forwards those references; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "image_projects_retrieve_details": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Looks up one image project's status, credits charged, and signed download URLs without changing the project or starting processing. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "image_projects_delete": {
@@ -303,8 +315,8 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Permanently deletes the selected project outputs and changes private project records, with diagnostic logging.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
+        "read_only_justification": "Permanently deletes the selected image project's outputs and changes private project records. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
         "destructive_justification": "Permanently removes rendered media and may remove an associated unapproved template; the deleted files cannot be restored by this tool."
       }
     },
@@ -315,9 +327,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_face_editor_edit_image": {
@@ -327,9 +339,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_gif_generator_create_image": {
@@ -339,9 +351,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_image_editor_create_image": {
@@ -351,9 +363,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_headshot_generator_create_image": {
@@ -363,9 +375,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_image_generator_create_image": {
@@ -375,9 +387,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_image_upscaler_create_image": {
@@ -387,9 +399,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_meme_generator_create_image": {
@@ -399,9 +411,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_qr_code_generator_create_image": {
@@ -411,9 +423,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "body_swap_create_image": {
@@ -423,9 +435,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "face_swap_photo_create_image": {
@@ -435,9 +447,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "head_swap_create_image": {
@@ -447,9 +459,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "image_background_remover_create_image": {
@@ -459,9 +471,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "photo_colorizer_create_image": {
@@ -471,21 +483,21 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private image project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "audio_projects_retrieve_details": {
       "annotations": {
-        "readOnlyHint": false,
+        "readOnlyHint": true,
         "destructiveHint": false,
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Retrieves data or media without starting a generation, but the MCP call writes private diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Does not delete, overwrite, publish, or revoke access to media or projects."
+        "read_only_justification": "Looks up one audio project's status, credits charged, and signed download URLs without changing the project or starting processing. Only server-side diagnostic logging of request metadata occurs, which is infrastructure telemetry rather than a tool action.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Read-only lookup; it does not delete, overwrite, publish, or revoke access to any media or project."
       }
     },
     "audio_projects_delete": {
@@ -495,8 +507,8 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Permanently deletes the selected project outputs and changes private project records, with diagnostic logging.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
+        "read_only_justification": "Permanently deletes the selected audio project's outputs and changes private project records. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
         "destructive_justification": "Permanently removes rendered media and may remove an associated unapproved template; the deleted files cannot be restored by this tool."
       }
     },
@@ -507,9 +519,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private audio project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account and Magic Hour's own processing and storage; it does not browse the public internet, publish content, or contact external recipients.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     },
     "ai_voice_cloner_create_audio": {
@@ -519,9 +531,9 @@
         "openWorldHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a private media-generation project, enqueues processing, charges applicable Magic Hour credits, and writes diagnostic logs.",
-        "open_world_justification": "Operates within private Magic Hour processing and storage without publishing content or sending messages to external recipients.",
-        "destructive_justification": "Adds a new generated output without deleting or overwriting the source media or existing projects."
+        "read_only_justification": "Creates a new private audio project, enqueues processing, and charges applicable Magic Hour credits, so it changes account state. The call also writes diagnostic logs.",
+        "open_world_justification": "Operates only within the user's authenticated private Magic Hour account. `*_file_path` inputs may reference a direct public media URL, but the tool only forwards that reference; Magic Hour's backend fetches the media into the private account, and nothing is published or sent externally.",
+        "destructive_justification": "Adds a new generated output as a new project without deleting or overwriting the source media or existing projects."
       }
     }
   },

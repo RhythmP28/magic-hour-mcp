@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
+from mcp_magichour.openapi_policies import LOGGING_GUIDANCE, READ_ONLY_LOGGING_GUIDANCE
 from mcp_magichour.openapi_server import (
     _project_download_guidance_text,
     _fetch_media_bytes,
@@ -18,6 +19,25 @@ from mcp_magichour.openapi_server import (
     app,
     mcp,
 )
+
+EXPECTED_TOOL_COUNT = 44
+# Pure reads: they fetch, look up, or retrieve data and change nothing. Server-side
+# diagnostic request logging is infrastructure telemetry, not a tool action.
+READ_ONLY_TOOLS = {
+    "ping",
+    "account_retrieve",
+    "video_projects_retrieve_details",
+    "image_projects_retrieve_details",
+    "audio_projects_retrieve_details",
+    "face_detection_retrieve_details",
+    "fetch_image_download",
+    "fetch_audio_download",
+    "fetch_video_download",
+    "wait_for_video_project",
+    "wait_for_image_project",
+    "wait_for_audio_project",
+}
+DESTRUCTIVE_TOOLS = {f"{asset}_projects_delete" for asset in ("image", "video", "audio")}
 
 
 class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
@@ -47,22 +67,56 @@ class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("wait_for_audio_project", names)
 
     async def test_every_exposed_tool_has_explicit_submission_hints(self):
-        for tool in await mcp.list_tools():
+        tools = await mcp.list_tools()
+        names = {tool.name for tool in tools}
+
+        self.assertEqual(len(tools), EXPECTED_TOOL_COUNT)
+        self.assertLessEqual(READ_ONLY_TOOLS, names)
+        self.assertLessEqual(DESTRUCTIVE_TOOLS, names)
+        for tool in tools:
             with self.subTest(tool=tool.name):
                 self.assertIsNotNone(tool.annotations)
                 for hint in ("readOnlyHint", "openWorldHint", "destructiveHint"):
                     self.assertIs(type(getattr(tool.annotations, hint)), bool)
-                # Every call passes through the diagnostic logging middleware.
-                self.assertFalse(tool.annotations.readOnlyHint)
+                self.assertEqual(tool.annotations.readOnlyHint, tool.name in READ_ONLY_TOOLS)
+                # Every tool is bounded to the user's private Magic Hour account.
                 self.assertFalse(tool.annotations.openWorldHint)
-                self.assertEqual(
-                    tool.annotations.destructiveHint,
-                    tool.name
-                    in {
-                        f"{asset}_projects_delete"
-                        for asset in ("image", "video", "audio")
-                    },
-                )
+                self.assertEqual(tool.annotations.destructiveHint, tool.name in DESTRUCTIVE_TOOLS)
+
+    async def test_generation_tools_are_writes_that_do_not_overwrite(self):
+        generation_suffixes = (
+            "_create_image",
+            "_create_video",
+            "_create_audio",
+            "_create_talking_photo",
+            "_edit_image",
+        )
+        tools = await mcp.list_tools()
+        generation = [tool for tool in tools if tool.name.endswith(generation_suffixes)]
+        starters = [
+            tool
+            for tool in tools
+            if tool.name in {"face_detection_detect_faces", "video_assets_generate_presigned_url"}
+        ]
+
+        self.assertEqual(len(generation), 27)
+        self.assertEqual(len(starters), 2)
+        for tool in generation + starters:
+            with self.subTest(tool=tool.name):
+                # Starts a job or creates a new project/upload slot: a write, but it
+                # never deletes or overwrites the source media.
+                self.assertFalse(tool.annotations.readOnlyHint)
+                self.assertFalse(tool.annotations.destructiveHint)
+
+    async def test_tool_descriptions_disclose_logging_without_overstating_reads(self):
+        for tool in await mcp.list_tools():
+            with self.subTest(tool=tool.name):
+                if tool.name in READ_ONLY_TOOLS:
+                    self.assertIn(READ_ONLY_LOGGING_GUIDANCE, tool.description)
+                    self.assertNotIn(LOGGING_GUIDANCE, tool.description)
+                else:
+                    self.assertIn(LOGGING_GUIDANCE, tool.description)
+                    self.assertNotIn(READ_ONLY_LOGGING_GUIDANCE, tool.description)
 
     async def test_wait_schemas_accept_terminal_and_timeout_results(self):
         for asset in ("image", "video", "audio"):
@@ -134,6 +188,40 @@ class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(submission["negative_test_cases"]), 3)
         for case in submission["test_cases"]:
             self.assertTrue(set(case["tools_triggered"].split(", ")) <= set(tools))
+
+    async def test_annotation_doc_table_matches_exposed_tools_and_submission(self):
+        root = Path(__file__).parents[1]
+        submission = json.loads((root / "chatgpt-app-submission.json").read_text())
+        doc = (root / "docs" / "chatgpt-tool-annotations.md").read_text()
+        rows = {}
+        for line in doc.splitlines():
+            if not line.startswith("| `"):
+                continue
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            self.assertEqual(len(cells), 7, line)
+            rows[cells[0].strip("`")] = cells[1:]
+        tools = {tool.name: tool for tool in await mcp.list_tools()}
+
+        self.assertEqual(set(rows), set(tools))
+        for name, (read_only, open_world, destructive, *justifications) in rows.items():
+            with self.subTest(tool=name):
+                self.assertEqual(
+                    {
+                        "readOnlyHint": read_only == "true",
+                        "openWorldHint": open_world == "true",
+                        "destructiveHint": destructive == "true",
+                    },
+                    tools[name].annotations.model_dump(exclude_none=True),
+                )
+                expected = submission["tools"][name]["justifications"]
+                self.assertEqual(
+                    justifications,
+                    [
+                        expected["read_only_justification"],
+                        expected["open_world_justification"],
+                        expected["destructive_justification"],
+                    ],
+                )
 
     async def test_server_does_not_expose_local_filesystem_upload_tool(self):
         names = {tool.name for tool in await mcp.list_tools()}
