@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 
 from mcp_magichour.openapi_server import (
     GLAMA_VERIFICATION_PATH,
@@ -269,7 +269,7 @@ class ChatGPTDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         tools = self.result(listed)["tools"]
         self.assertGreater(len(tools), 0)
         self.assertTrue(
-            all(tool["securitySchemes"] == [{"type": "oauth2", "scopes": []}] for tool in tools)
+            all(tool["_meta"]["securitySchemes"] == [{"type": "oauth2", "scopes": []}] for tool in tools)
         )
         ping = next(tool for tool in tools if tool["name"] == "ping")
         self.assertNotIn("ui", ping.get("_meta", {}))

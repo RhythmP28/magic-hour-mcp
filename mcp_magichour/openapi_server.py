@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
 from fastmcp.server.providers.openapi import MCPType, RouteMap
@@ -655,6 +655,8 @@ middleware = [
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=[
             "mcp-protocol-version",
+            "mcp-method",
+            "mcp-name",
             "mcp-session-id",
             "Authorization",
             "Content-Type",

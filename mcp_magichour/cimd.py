@@ -24,7 +24,7 @@ from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
-import httpx
+import httpx2 as httpx
 
 
 DEFAULT_ALLOWED_HOSTS = ("chatgpt.com",)

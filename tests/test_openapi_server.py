@@ -6,7 +6,7 @@ from base64 import b64encode
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2 as httpx
 
 from mcp_magichour.openapi_policies import LOGGING_GUIDANCE, READ_ONLY_LOGGING_GUIDANCE
 from mcp_magichour.openapi_server import (
@@ -182,7 +182,7 @@ class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
         for name, entry in submission["tools"].items():
             self.assertEqual(
                 entry["annotations"],
-                tools[name].annotations.model_dump(exclude_none=True),
+                tools[name].annotations.model_dump(by_alias=True, exclude_none=True),
             )
         self.assertEqual(len(submission["test_cases"]), 5)
         self.assertEqual(len(submission["negative_test_cases"]), 3)
@@ -211,7 +211,7 @@ class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
                         "openWorldHint": open_world == "true",
                         "destructiveHint": destructive == "true",
                     },
-                    tools[name].annotations.model_dump(exclude_none=True),
+                    tools[name].annotations.model_dump(by_alias=True, exclude_none=True),
                 )
                 expected = submission["tools"][name]["justifications"]
                 self.assertEqual(

@@ -153,7 +153,7 @@ class OpenApiPolicyTests(unittest.TestCase):
             "delete": tool_annotations(read_only=False, destructive=True),
         }
         for kind, annotations in actual.items():
-            self.assertEqual(annotations.model_dump(exclude_none=True), expected[kind], kind)
+            self.assertEqual(annotations.model_dump(by_alias=True, exclude_none=True), expected[kind], kind)
         with self.assertRaisesRegex(ValueError, "read-only tool cannot also be destructive"):
             tool_annotations(read_only=True, destructive=True)
 
@@ -187,7 +187,7 @@ class OpenApiPolicyTests(unittest.TestCase):
                     SimpleNamespace(method="GET", path=path, tags=[]), component
                 )
                 self.assertEqual(
-                    component.annotations.model_dump(exclude_none=True),
+                    component.annotations.model_dump(by_alias=True, exclude_none=True),
                     {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
                 )
                 self.assertIn("magic-hour", component.tags)

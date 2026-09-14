@@ -17,7 +17,7 @@ from time import monotonic, time
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
-import httpx
+import httpx2 as httpx
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools.base import Tool, ToolResult
@@ -738,7 +738,7 @@ class MCPBearerChallengeMiddleware:
 class _OAuthListedTool(Tool):
     def to_mcp_tool(self, **overrides: Any):
         tool = super().to_mcp_tool(**overrides)
-        tool.securitySchemes = OAUTH_SECURITY_SCHEMES
+        tool.meta = {**(tool.meta or {}), "securitySchemes": OAUTH_SECURITY_SCHEMES}
         return tool
 
 

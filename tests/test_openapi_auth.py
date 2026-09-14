@@ -1,7 +1,7 @@
 import logging
 import unittest
 
-import httpx
+import httpx2 as httpx
 
 from mcp_magichour.openapi_auth import (
     BearerPassthroughAuth,

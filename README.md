@@ -90,6 +90,10 @@ Override `MAGIC_HOUR_API_BASE_URL` to use a mock or another API base:
 MAGIC_HOUR_API_BASE_URL=https://api.sideko.dev/v1/mock/magichour/magic-hour/latest python main.py
 ```
 
+The server supports MCP `2026-07-28` (sessionless `server/discover` and per-request
+metadata) and legacy clients using `initialize`. FastMCP, MCP, and httpx2 are pinned
+in `pyproject.toml`; install those dependencies together.
+
 ## OAuth compatibility
 
 The OAuth shim supports ChatGPT's stable callback with issuer identification,
@@ -113,7 +117,8 @@ Check a deployment's discovery, annotations, auth challenges, and widget domain:
 python scripts/verify_chatgpt_readiness.py https://mcp.magichour.ai
 ```
 
-This credential-free check does not replace the full ChatGPT connection test.
+The check exercises both modern and legacy protocols (22 checks when domain
+verification is configured). It does not replace the full ChatGPT connection test.
 
 ## Test with MCP Inspector
 

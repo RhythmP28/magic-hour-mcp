@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-import httpx
+import httpx2 as httpx
 from starlette.datastructures import Headers
 
 from .oauth_tokens import SealedTokenCodec, TokenError

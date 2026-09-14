@@ -10,7 +10,7 @@ readiness script), plus the follow-up fixes described below. Official repo: gith
 
 - The server speaks MCP JSON-RPC at the root path `/` (`/mcp` returns 404) and now implements what ChatGPT's plugin platform expects from an OAuth authorization server: RFC 9207 `iss`, the stable ChatGPT callback, CIMD, sealed access/refresh tokens, scopes.
 - Robert's "ChatGPT never scans the tools" blocker was two bugs on his branch, not an OpenAI-side problem; a fixed test deployment completed DCR, OAuth and the scan and listed all 44 tools in a ChatGPT Business workspace.
-- Local and test deployments are ready (99 tests; `scripts/verify_chatgpt_readiness.py` 16/16). A private Business-workspace app is ready pending one human re-test of this exact build.
+- Local and test deployments are ready (102 tests; `scripts/verify_chatgpt_readiness.py` 22/22). A private Business-workspace app is ready pending one human re-test of this exact build.
 - Public Plugin Directory submission is not ready: it needs Magic Hour account OAuth (Part B), shared authorization-code storage, refresh replay protection and upstream renewal, policy decisions, and the portal prerequisites.
 - Users still log in by pasting an API key by default; OpenAI's plugin guidelines forbid that for the public listing.
 
@@ -77,8 +77,9 @@ and stopped there.
 2. His branch ran fastmcp 4 and assigned `securitySchemes` on a pydantic model that
    has no such field under fastmcp 4, which broke `tools/list`.
 
-Neither bug exists on upstream main, which pins `fastmcp>=3.4.0,<4.0` and never had
-the replay code. After fixing both on a test deployment, ChatGPT completed
+Neither bug existed on the upstream base, which pinned `fastmcp>=3.4.0,<4.0`
+and never had the replay code. This branch now upgrades to FastMCP 4 with the
+auth-metadata and error-handler adaptations described below. After fixing both on a test deployment, ChatGPT completed
 DCR -> OAuth (`/authorize`, `/token`) -> scan and showed all 44 tools as actions in
 the Business workspace (Review status: development).
 
@@ -186,19 +187,45 @@ Follow-up review fixes:
   Its recoverable notes were checked against code and targeted regression tests;
   this document does not claim a completed independent security audit.
 
+Protocol compatibility follow-up:
+
+- ChatGPT later sent `MCP-Protocol-Version: 2026-07-28`. The FastMCP 3/MCP 1
+  preview rejected it with HTTP 400. The original 16-check readiness script only
+  exercised the legacy protocol and missed this failure.
+- `pyproject.toml` now pins FastMCP 4.0.3, MCP 2.2.0, and httpx2 2.13.0. The SDK
+  natively supports the modern sessionless protocol and legacy initialization.
+  Requests are not relabeled or silently downgraded.
+- `oauth_compat.py` places per-tool auth declarations in `_meta.securitySchemes`,
+  the supported OpenAI compatibility field, instead of assigning an undeclared
+  Pydantic field. `mcp_errors.py` uses SDK v2 handler registration and errors;
+  HTTP clients and transports use httpx2 consistently.
+- `tests/test_modern_protocol.py` covers modern discovery, all 44 tool descriptors,
+  sealed-token ping, image creation and polling with a mock API, widget loading,
+  auth challenges, invalid arguments, and rejection of unknown protocol versions.
+  The existing legacy tests also pass. The live preview passes 22 checks including
+  the modern HTTP headers and per-request metadata envelope.
+- The user confirmed ping and account retrieval in ChatGPT before this upgrade.
+  Their subsequent generation attempt exposed the protocol mismatch. A human
+  image-generation retry is still required after this fix.
+
+References: [FastMCP 4 upgrade guide](https://gofastmcp.com/getting-started/upgrading/from-fastmcp-3),
+[modern MCP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http),
+and [OpenAI tool metadata](https://developers.openai.com/plugins/reference).
+
 ## What works today (verified)
 
-- 99 unit tests pass (`tests/`), covering the token codec, CIMD resolver, issuer
+- 102 unit tests pass (`tests/`), covering the token codec, CIMD resolver, issuer
   identification, stable callback, refresh rotation, scope handling, bearer
   unwrapping, broker round trip and failure paths, annotations, submission-file
   agreement, discovery, widget CSP, and the challenge endpoint.
-- `scripts/verify_chatgpt_readiness.py <base-url>` reports 16/16 PASS against the
+- `scripts/verify_chatgpt_readiness.py <base-url>` reports 22/22 PASS against the
   test deployment: protected-resource and authorization-server metadata, `iss`
   support, CIMD, refresh grant, DCR with the stable callback, challenge token,
   `initialize`, `tools/list` (44 tools, all with the three hints and
   `securitySchemes`), the `mcp/www_authenticate` challenge on an unauthenticated
   `tools/call`, the HTTP 401 `WWW-Authenticate` header, and the widget domain on
-  the UI template.
+  the UI template, plus modern `server/discover`, `tools/list`, tool-level auth
+  challenges, and resource listing/reading using `2026-07-28`.
 - ChatGPT Business end-to-end (DCR -> `/authorize` -> `/token` -> automatic scan ->
   44 actions) was completed today, but against Robert's fixed branch, which uses
   legacy raw-key tokens and DCR. This branch's CIMD + sealed-token path has been
@@ -257,8 +284,9 @@ Recommended
 1. Vercel serves `app` from `main.py`; the build script in `pyproject.toml`
    (`[tool.vercel.scripts]`) runs `npm --prefix web ci && npm --prefix web run build`
    to produce the widget in `mcp_magichour/static/project-result/`.
-2. Dependencies come from `pyproject.toml`; keep `fastmcp>=3.4.0,<4.0`. A fastmcp 4
-   upgrade needs separate compatibility testing. There is no Python lockfile upstream;
+2. Dependencies come from `pyproject.toml`: `fastmcp==4.0.3`, `mcp==2.2.0`,
+   and `httpx2==2.13.0` are tested together. These replace the earlier FastMCP 3 pin
+   because ChatGPT sends MCP `2026-07-28`. There is no Python lockfile upstream;
    add one (`pip-compile` to `requirements.txt` or `uv lock`) and point Vercel at it
    so a resolver change cannot alter production.
 3. Environment variables (Vercel > Project > Settings > Environment Variables):
@@ -294,7 +322,7 @@ Recommended
    ```sh
    pip install -e .
    (cd web && npm ci && npm run build)
-   python -m unittest discover -s tests -q  # expect 99 tests, OK
+   python -m unittest discover -s tests -q  # expect 102 tests, OK
    ```
 
 5. Deploy, then verify the live deployment without credentials:
@@ -303,7 +331,7 @@ Recommended
    python scripts/verify_chatgpt_readiness.py https://mcp.magichour.ai
    ```
 
-   Expect 16 PASS, 0 FAIL. `openai-apps-challenge not configured` is a WARN until
+   Expect 22 PASS, 0 FAIL. `openai-apps-challenge not configured` is a WARN until
    `OPENAI_APPS_CHALLENGE_TOKEN` is set. The script exits 1 on any FAIL.
 
 6. Do not enable `MAGIC_HOUR_OAUTH_*` until Part B exists; with them set and the
@@ -311,10 +339,11 @@ Recommended
 
 ## How to test the full ChatGPT flow (Business workspace)
 
-This is the re-test that this branch still needs from a human.
+Ping and account retrieval were confirmed by the user before the protocol upgrade.
+Repeat the flow and complete image generation against this new build.
 
 1. Deploy this branch with `MCP_OAUTH_ISSUER_URL`, `MCP_OAUTH_RESOURCE_URL`,
-   `MCP_OAUTH_TOKEN_SECRET`, `MCP_APP_ORIGIN` set. Run the readiness script (16/16).
+   `MCP_OAUTH_TOKEN_SECRET`, `MCP_APP_ORIGIN` set. Run the readiness script (22/22).
 2. In ChatGPT (Business workspace, admin): Settings > Apps & Connectors (or the
    workspace admin's Connectors page) > Create / Add app > MCP server URL
    `https://mcp.magichour.ai/` (with the trailing slash, root path), authentication
@@ -343,7 +372,8 @@ What the server side should show, in order:
   `code`, `state` and `iss`.
 - `POST /token` 200 with `grant_type=authorization_code`; later `POST /token` with
   `grant_type=refresh_token` and no preceding `/authorize`.
-- `POST /` for `initialize`, `tools/list`, `resources/list`, then `tools/call` with
+- `POST /` for `initialize` (legacy) or `server/discover` (modern), `tools/list`,
+  `resources/list`, then `tools/call` with
   `auth_scheme=bearer`.
 
 How to read the logs:
@@ -430,8 +460,8 @@ Portal steps, in order:
 
 | Level | Verdict | What is missing |
 |---|---|---|
-| Local / test deployment | Ready | Nothing: 99 tests pass, readiness script 16/16. |
-| ChatGPT private app (Business workspace) | Ready, pending one human re-test against this build | Run the flow above once with CIMD + sealed tokens; the human ChatGPT pass used Robert's fixed branch; this build passed a scripted ASGI flow with a stub API. |
+| Local / test deployment | Ready | Nothing: 102 tests pass, readiness script 22/22. |
+| ChatGPT private app (Business workspace) | Ready, pending one human re-test against this build | Run the flow above once with CIMD + sealed tokens; ping/account worked in ChatGPT before the protocol upgrade; the upgraded build passes the scripted flow with a mock API, and needs a human generation retry. |
 | Public Plugin Directory submission | Not ready | Part B (account OAuth), shared code storage, refresh replay protection and upstream renewal, policy decisions, portal prerequisites (verified org, public URLs, reviewer credentials, 5/3 test cases, recording, logo, 706 px screenshots). |
 
 ## Known limitations & risks
@@ -473,8 +503,8 @@ Portal steps, in order:
      links (the widget only displays `credits_charged`); Magic Hour API error bodies
      pass through unmodified, so check that tier-restriction errors from the API do
      not carry upgrade links.
-6. This branch's CIMD + sealed-token path has not been run end to end against ChatGPT
-   by a human yet; the successful run used Robert's fixed branch (raw-key tokens, DCR).
+6. Human ChatGPT ping/account calls succeeded before the protocol upgrade, but
+   image generation and token refresh still need human verification on this build.
 7. Broker mode never refreshes upstream or honors upstream expiry. Implement renewal
    or explicit reauthorization against the agreed backend contract (see Part B).
 8. `MCP_APP_ORIGIN` defaults to the `VERCEL_URL` deployment host; leaving it unset in

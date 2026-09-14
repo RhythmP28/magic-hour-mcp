@@ -20,6 +20,7 @@ import urllib.request
 
 CHATGPT_STABLE_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
 REQUIRED_ANNOTATIONS = ("readOnlyHint", "openWorldHint", "destructiveHint")
+CURRENT_PROTOCOL_VERSION = "2026-07-28"
 results: list[tuple[str, str]] = []
 
 
@@ -41,8 +42,23 @@ def _lower_keys(headers) -> dict:
     return {name.lower(): value for name, value in headers.items()}
 
 
-def json_rpc(base: str, payload: dict, *, token: str | None = None):
+def json_rpc(base: str, payload: dict, *, token: str | None = None, protocol_version: str | None = None):
     headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    if protocol_version:
+        headers["MCP-Protocol-Version"] = protocol_version
+        headers["Mcp-Method"] = payload["method"]
+        params = dict(payload.get("params") or {})
+        if payload["method"] == "tools/call":
+            headers["Mcp-Name"] = params["name"]
+        elif payload["method"] == "resources/read":
+            headers["Mcp-Name"] = params["uri"]
+        params["_meta"] = {
+            **params.get("_meta", {}),
+            "io.modelcontextprotocol/protocolVersion": protocol_version,
+            "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientInfo": {"name": "readiness", "version": "2"},
+        }
+        payload = {**payload, "params": params}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     status, response_headers, body = http("POST", base + "/", body=json.dumps(payload).encode(), headers=headers)
@@ -59,6 +75,7 @@ def json_rpc(base: str, payload: dict, *, token: str | None = None):
 
 
 def main(base: str) -> int:
+    results.clear()
     base = base.rstrip("/")
 
     # --- OAuth discovery -------------------------------------------------
@@ -152,7 +169,7 @@ def main(base: str) -> int:
             record("FAIL", f"{len(missing)} tools lack explicit annotations (annotations_required): {missing[:5]}...")
         else:
             record("PASS", "every tool declares readOnlyHint/openWorldHint/destructiveHint")
-        no_security = [t["name"] for t in tools if not t.get("securitySchemes")]
+        no_security = [t["name"] for t in tools if not (t.get("securitySchemes") or (t.get("_meta") or {}).get("securitySchemes"))]
         if no_security:
             record("WARN", f"{len(no_security)} tools have no securitySchemes (ChatGPT tool-level auth UI needs them)")
         else:
@@ -187,6 +204,42 @@ def main(base: str) -> int:
             record("PASS", f"UI template {resource['uri']} declares widget domain {domain}")
         else:
             record("FAIL", f"UI template {resource['uri']} has no widget domain (required for submission)")
+
+    # Modern MCP has no initialize handshake. Exercise its real HTTP header
+    # and per-request envelope; a legacy-only server must fail this check.
+    modern = {"protocol_version": CURRENT_PROTOCOL_VERSION}
+    status, _, message = json_rpc(base, {"jsonrpc": "2.0", "id": 10, "method": "server/discover"}, **modern)
+    discovered = (message or {}).get("result", {})
+    record("PASS" if status == 200 and CURRENT_PROTOCOL_VERSION in discovered.get("supportedVersions", []) else "FAIL",
+           f"modern server/discover supports {CURRENT_PROTOCOL_VERSION}")
+    status, _, message = json_rpc(base, {"jsonrpc": "2.0", "id": 11, "method": "tools/list"}, **modern)
+    modern_tools = (message or {}).get("result", {}).get("tools", [])
+    record("PASS" if status == 200 and len(modern_tools) == 44 else "FAIL",
+           f"modern tools/list: {len(modern_tools)} tools")
+    complete = modern_tools and all(
+        all(isinstance((tool.get("annotations") or {}).get(key), bool) for key in REQUIRED_ANNOTATIONS)
+        and (tool.get("securitySchemes") or (tool.get("_meta") or {}).get("securitySchemes"))
+        for tool in modern_tools
+    )
+    record("PASS" if complete else "FAIL", "modern tool annotations and OAuth metadata")
+    status, _, message = json_rpc(base, {
+        "jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": {"name": "ping", "arguments": {}},
+    }, **modern)
+    result = (message or {}).get("result", {})
+    record("PASS" if status == 200 and result.get("isError") and result.get("_meta", {}).get("mcp/www_authenticate") else "FAIL",
+           "modern unauthenticated tools/call returns OAuth challenge")
+    status, _, message = json_rpc(base, {"jsonrpc": "2.0", "id": 13, "method": "resources/list"}, **modern)
+    modern_resources = (message or {}).get("result", {}).get("resources", [])
+    record("PASS" if status == 200 and any(str(r.get("uri", "")).startswith("ui://") for r in modern_resources) else "FAIL",
+           "modern resources/list exposes the result widget")
+    for resource in modern_resources:
+        if str(resource.get("uri", "")).startswith("ui://"):
+            status, _, message = json_rpc(base, {
+                "jsonrpc": "2.0", "id": 14, "method": "resources/read", "params": {"uri": resource["uri"]},
+            }, **modern)
+            contents = (message or {}).get("result", {}).get("contents", [])
+            record("PASS" if status == 200 and contents and contents[0].get("text", "").startswith("<!DOCTYPE html>") else "FAIL",
+                   "modern resources/read returns the result widget HTML")
 
     failures = sum(1 for level, _ in results if level == "FAIL")
     warnings = sum(1 for level, _ in results if level == "WARN")

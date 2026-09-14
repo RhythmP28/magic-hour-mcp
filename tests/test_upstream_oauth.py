@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
+import httpx2 as httpx
 from starlette.applications import Starlette
 
 from mcp_magichour.oauth_compat import (

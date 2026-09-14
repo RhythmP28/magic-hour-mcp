@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-import httpx
+import httpx2 as httpx
 
 from .oauth_tokens import SealedTokenCodec, TokenError
 

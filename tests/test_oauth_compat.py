@@ -3,7 +3,7 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
-import httpx
+import httpx2 as httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
