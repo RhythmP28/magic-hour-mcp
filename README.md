@@ -9,6 +9,7 @@ and project downloads.
 
 Docs:
 
+- [CURRENT-STATUS.md](CURRENT-STATUS.md) - ChatGPT architecture, deployment, test steps, and public submission blockers
 - [Magic Hour agent skills](https://github.com/magichourhq/skills) - media workflows, published examples, and recovery guidance
 - `user.md` - hosted endpoint user guide
 - `integration-handoff.md` - FastAPI mount checklist
@@ -60,6 +61,27 @@ MAGIC_HOUR_API_BASE_URL=https://api.magichour.ai
 MAGIC_HOUR_OPENAPI_PATH=docs/openapi.json
 MCP_OAUTH_ISSUER_URL=https://mcp.magichour.ai
 MCP_OAUTH_RESOURCE_URL=https://mcp.magichour.ai
+
+# Sealed OAuth tokens (use a random secret of at least 32 characters)
+# MCP_OAUTH_TOKEN_SECRET=<random-secret>
+MCP_OAUTH_ACCESS_TOKEN_TTL=28800
+MCP_OAUTH_REFRESH_TOKEN_TTL=2592000
+# Extra CIMD hosts; chatgpt.com is always allowed
+# MCP_OAUTH_CIMD_ALLOWED_HOSTS=another-client.example
+MAGIC_HOUR_OAUTH_VALIDATION_PATH=/v1/ai-image-generator
+
+MCP_APP_ORIGIN=https://mcp.magichour.ai
+# Defaults to MCP_APP_ORIGIN; use a unique origin for this plugin
+MCP_APP_WIDGET_DOMAIN=https://mcp.magichour.ai
+# OPENAI_APPS_CHALLENGE_TOKEN=<token-from-the-submission-portal>
+
+# Account login: set all three once Magic Hour exposes OAuth endpoints
+# MAGIC_HOUR_OAUTH_AUTHORIZE_URL=https://<auth-host>/authorize
+# MAGIC_HOUR_OAUTH_TOKEN_URL=https://<auth-host>/token
+# MAGIC_HOUR_OAUTH_CLIENT_ID=<registered-client-id>
+# MAGIC_HOUR_OAUTH_CLIENT_SECRET=<optional-client-secret>
+# MAGIC_HOUR_OAUTH_SCOPES=<upstream-scopes>
+MAGIC_HOUR_OAUTH_CALLBACK_PATH=/oauth/callback
 ```
 
 Override `MAGIC_HOUR_API_BASE_URL` to use a mock or another API base:
@@ -70,12 +92,28 @@ MAGIC_HOUR_API_BASE_URL=https://api.sideko.dev/v1/mock/magichour/magic-hour/late
 
 ## OAuth compatibility
 
-The optional OAuth shim validates a Magic Hour API key and uses that key as the
-access token. Production requires `MCP_OAUTH_ISSUER_URL` and
-`MCP_OAUTH_RESOURCE_URL`. See `docs/future-oauth-support.md` for deployment
-limits.
+The OAuth shim supports ChatGPT's stable callback with issuer identification,
+Client ID Metadata Documents (CIMD), and public-client PKCE. With
+`MCP_OAUTH_TOKEN_SECRET` set, it issues sealed access and refresh tokens.
+Without it, the legacy mode returns the API key as the access token.
+Production requires explicit `MCP_OAUTH_ISSUER_URL` and `MCP_OAUTH_RESOURCE_URL`.
+
+The default login page asks for an API key and is intended for private testing.
+Public submission requires account login: configure the three upstream OAuth
+URL/client variables above and `MCP_OAUTH_TOKEN_SECRET` to enable the broker.
+Magic Hour must provide those endpoints and accept user tokens at its API.
+See [CURRENT-STATUS.md](CURRENT-STATUS.md) for the backend contract and remaining
+limits, including process-local authorization codes and refresh-token revocation.
 
 Public OAuth clients can use the stateless `POST /register` compatibility endpoint.
+
+Check a deployment's discovery, annotations, auth challenges, and widget domain:
+
+```sh
+python scripts/verify_chatgpt_readiness.py https://mcp.magichour.ai
+```
+
+This credential-free check does not replace the full ChatGPT connection test.
 
 ## Test with MCP Inspector
 

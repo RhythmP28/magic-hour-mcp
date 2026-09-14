@@ -32,9 +32,13 @@ def http(method: str, url: str, *, body: bytes | None = None, headers: dict | No
     request = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, dict(response.headers), response.read()
+            return response.status, _lower_keys(response.headers), response.read()
     except urllib.error.HTTPError as error:
-        return error.code, dict(error.headers), error.read()
+        return error.code, _lower_keys(error.headers), error.read()
+
+
+def _lower_keys(headers) -> dict:
+    return {name.lower(): value for name, value in headers.items()}
 
 
 def json_rpc(base: str, payload: dict, *, token: str | None = None):
@@ -44,7 +48,7 @@ def json_rpc(base: str, payload: dict, *, token: str | None = None):
     status, response_headers, body = http("POST", base + "/", body=json.dumps(payload).encode(), headers=headers)
     text = body.decode("utf-8", "replace")
     message = None
-    if "text/event-stream" in response_headers.get("Content-Type", ""):
+    if "text/event-stream" in response_headers.get("content-type", ""):
         for line in text.splitlines():
             if line.startswith("data: "):
                 message = json.loads(line[6:])
@@ -115,12 +119,12 @@ def main(base: str) -> int:
 
     # --- Domain verification endpoint ----------------------------------------
     status, headers, body = http("GET", f"{base}/.well-known/openai-apps-challenge")
-    if status == 200 and headers.get("Content-Type", "").startswith("text/plain") and body.strip():
+    if status == 200 and headers.get("content-type", "").startswith("text/plain") and body.strip():
         record("PASS", "openai-apps-challenge serves a plain-text token")
     elif status == 404:
         record("WARN", "openai-apps-challenge not configured yet (set OPENAI_APPS_CHALLENGE_TOKEN before Verify Domain)")
     else:
-        record("FAIL", f"openai-apps-challenge returned {status} {headers.get('Content-Type')}")
+        record("FAIL", f"openai-apps-challenge returned {status} {headers.get('content-type')}")
 
     # --- MCP discovery without credentials ----------------------------------
     status, _, message = json_rpc(
@@ -167,7 +171,7 @@ def main(base: str) -> int:
         record("FAIL", f"unauthenticated tools/call did not return a challenge: {message}")
 
     status, headers, _ = http("GET", f"{base}/", headers={"Accept": "application/json"})
-    if status == 401 and "resource_metadata=" in headers.get("WWW-Authenticate", ""):
+    if status == 401 and "resource_metadata=" in headers.get("www-authenticate", ""):
         record("PASS", "HTTP 401 challenge carries WWW-Authenticate resource_metadata")
     else:
         record("WARN", f"GET / without auth returned {status} (expected 401 with WWW-Authenticate)")
