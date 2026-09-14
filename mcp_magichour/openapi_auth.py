@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 import logging
+import os
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
 from starlette.datastructures import Headers
+
+from .oauth_tokens import SealedTokenCodec, TokenError
 
 
 # Inherit Uvicorn's configured INFO handler in standalone and mounted deployments.
@@ -31,11 +35,60 @@ def current_authorization_header() -> str:
         raise AuthError("Missing Authorization header. Send 'Authorization: Bearer <magic_hour_api_key>'.")
 
     scheme, _, token = header.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
         logger.warning("auth_rejected request_id=%s reason=malformed scheme=%s", _request_id.get(), _safe_auth_scheme(header))
         raise AuthError("Missing or malformed Authorization header. Send 'Authorization: Bearer <magic_hour_api_key>'.")
 
-    return f"Bearer {token.strip()}"
+    if SealedTokenCodec.is_sealed(token):
+        return f"Bearer {_unwrap_sealed_token(token)}"
+    return f"Bearer {token}"
+
+
+def _unwrap_sealed_token(token: str) -> str:
+    """Exchange a sealed OAuth access token for the credential it protects."""
+    codec = token_codec()
+    if codec is None:
+        logger.warning("auth_rejected request_id=%s reason=sealed_token_disabled", _request_id.get())
+        raise AuthError("Sealed access tokens are not enabled on this server.")
+    try:
+        claims = codec.open_access_token(token)
+    except TokenError as error:
+        logger.warning("auth_rejected request_id=%s reason=sealed_token_invalid detail=%s", _request_id.get(), error)
+        raise AuthError("Access token is invalid or expired. Re-authorize to continue.") from None
+    expected = expected_resource()
+    if expected and claims.resource and not _same_resource(claims.resource, expected):
+        logger.warning("auth_rejected request_id=%s reason=audience_mismatch", _request_id.get())
+        raise AuthError("Access token was issued for a different resource.")
+    return claims.credential
+
+
+_codec_state: dict[str, Any] = {}
+
+
+def token_codec() -> SealedTokenCodec | None:
+    """Process-wide codec built from MCP_OAUTH_TOKEN_SECRET (lazily, once)."""
+    if "codec" not in _codec_state:
+        _codec_state["codec"] = SealedTokenCodec.from_env()
+    return _codec_state["codec"]
+
+
+def configure_token_codec(codec: SealedTokenCodec | None) -> None:
+    """Override the process-wide codec (tests, embedding applications)."""
+    _codec_state["codec"] = codec
+
+
+def expected_resource() -> str | None:
+    return (os.getenv("MCP_OAUTH_RESOURCE_URL") or os.getenv("MCP_OAUTH_ISSUER_URL") or "").rstrip("/") or None
+
+
+def _same_resource(left: str, right: str) -> bool:
+    left_parts, right_parts = urlsplit(left), urlsplit(right)
+    return (
+        left_parts.scheme.lower(), left_parts.netloc.lower(), left_parts.path.rstrip("/"), left_parts.query
+    ) == (
+        right_parts.scheme.lower(), right_parts.netloc.lower(), right_parts.path.rstrip("/"), right_parts.query
+    )
 
 
 def _safe_auth_scheme(header: str | None) -> str:

@@ -179,12 +179,15 @@ class OAuthCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             ["authorization_code", "refresh_token"],
         )
         client_id = registration["client_id"]
+        self.assertIsInstance(registration["client_id_issued_at"], int)
         self.assertEqual(
             registration,
             {
                 "client_id": client_id,
+                "client_id_issued_at": registration["client_id_issued_at"],
                 "redirect_uris": [redirect_uri],
                 "token_endpoint_auth_method": "none",
+                # Refresh tokens are only offered once MCP_OAUTH_TOKEN_SECRET is set.
                 "grant_types": ["authorization_code"],
                 "response_types": ["code"],
             },

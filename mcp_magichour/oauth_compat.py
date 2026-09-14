@@ -28,8 +28,11 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import BaseRoute, Mount, Route
 
+from .cimd import CIMDError, ClientMetadata, ClientMetadataResolver, allowed_cimd_hosts_from_env, is_client_id_url
+from .oauth_tokens import SealedTokenCodec, TokenError
 from .openapi_auth import AuthError, current_authorization_header
 from .posthog_client import OAuthCodeEvent, analytics
+from .upstream_oauth import UpstreamOAuthBroker, UpstreamOAuthError, UpstreamOAuthSettings
 
 
 CODE_TTL_SECONDS = 300
@@ -41,15 +44,24 @@ MAX_CONCURRENT_VALIDATIONS = 10
 API_KEY_VERIFICATION_ERROR = (
     "We couldn't verify this API key. Check that you copied the full key and try again."
 )
+# ChatGPT uses the stable callback when the server implements issuer
+# identification (RFC 9207); older connections and servers without it use the
+# per-connection ``/connector/oauth/{callback_id}`` form.
+CHATGPT_STABLE_REDIRECT_URI = "https://chatgpt.com/connector_platform_oauth_redirect"
 ALLOWED_REDIRECT_URIS = {
     "https://claude.ai/api/mcp/auth_callback",
     "http://localhost:8787/callback",
+    CHATGPT_STABLE_REDIRECT_URI,
 }
 ALLOWED_REDIRECT_URI_PATTERNS = [
     re.compile(r"https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{12}"),
 ]
 PKCE_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+SCOPE_RE = re.compile(r"^[\x21\x23-\x5b\x5d-\x7e]+$")
+MCP_SCOPE = "mcp"
+OFFLINE_ACCESS_SCOPE = "offline_access"
+SUPPORTED_SCOPES = (MCP_SCOPE, OFFLINE_ACCESS_SCOPE)
 ApiKeyValidator = Callable[[str], Awaitable[bool]]
 logger = logging.getLogger("uvicorn.error.mcp_oauth")
 OAUTH_SECURITY_SCHEMES = [{"type": "oauth2", "scopes": []}]
@@ -67,6 +79,8 @@ class AuthorizationCode:
     code_challenge: str
     resource: str | None
     expires_at: float
+    scope: str = ""
+    refresh_allowed: bool = False
 
 
 class AuthorizationCodeStore:
@@ -86,6 +100,8 @@ class AuthorizationCodeStore:
         redirect_uri: str,
         code_challenge: str,
         resource: str | None,
+        scope: str = "",
+        refresh_allowed: bool = False,
     ) -> str:
         code = secrets.token_urlsafe(32)
         now = monotonic()
@@ -96,6 +112,8 @@ class AuthorizationCodeStore:
             code_challenge=code_challenge,
             resource=resource,
             expires_at=now + self.ttl_seconds,
+            scope=scope,
+            refresh_allowed=refresh_allowed,
         )
         with self._lock:
             self._remove_expired(now)
@@ -163,12 +181,39 @@ class OAuthCompatibilityServer:
         settings: OAuthSettings | None = None,
         api_key_validator: ApiKeyValidator | None = None,
         code_store: AuthorizationCodeStore | None = None,
+        token_codec: SealedTokenCodec | None | bool = False,
+        client_metadata_resolver: ClientMetadataResolver | None = None,
+        upstream: UpstreamOAuthBroker | None | bool = False,
     ) -> None:
         self.settings = settings or OAuthSettings.from_env()
         _validate_settings(self.settings)
         self.codes = code_store or AuthorizationCodeStore()
         self.validate_api_key = api_key_validator or self._validate_api_key
         self._validation_slots = asyncio.Semaphore(MAX_CONCURRENT_VALIDATIONS)
+        # ``False`` (the default) means "read MCP_OAUTH_TOKEN_SECRET from the
+        # environment"; pass ``None`` explicitly to force legacy raw-key tokens.
+        self.token_codec = SealedTokenCodec.from_env() if token_codec is False else token_codec
+        self.client_metadata = client_metadata_resolver or ClientMetadataResolver(
+            allowed_hosts=allowed_cimd_hosts_from_env()
+        )
+        if upstream is False:
+            upstream_settings = UpstreamOAuthSettings.from_env()
+            if upstream_settings is None:
+                upstream = None
+            elif self.token_codec is None:
+                raise RuntimeError("MAGIC_HOUR_OAUTH_* broker mode requires MCP_OAUTH_TOKEN_SECRET")
+            else:
+                upstream = UpstreamOAuthBroker(upstream_settings, self.token_codec)
+        self.upstream = upstream
+
+    @property
+    def refresh_tokens_enabled(self) -> bool:
+        return self.token_codec is not None
+
+    @property
+    def account_login_enabled(self) -> bool:
+        """True when users log in with their Magic Hour account (broker mode)."""
+        return self.upstream is not None
 
     def _code_event(self, event: OAuthCodeEvent, code: str) -> BackgroundTask:
         # Capture operation time before the response; send telemetry afterward.
@@ -185,7 +230,7 @@ class OAuthCompatibilityServer:
         )
 
     def routes(self) -> list[Route]:
-        return [
+        routes = [
             Route("/register", self.register, methods=["POST"]),
             Route("/authorize", self.authorize, methods=["GET", "POST"]),
             Route("/token", self.token, methods=["POST"]),
@@ -193,11 +238,14 @@ class OAuthCompatibilityServer:
             Route("/.well-known/oauth-protected-resource", self.protected_resource_metadata),
             Route("/.well-known/oauth-protected-resource/mcp", self.protected_resource_metadata),
         ]
+        if self.upstream is not None:
+            routes.append(Route(self.upstream.callback_path, self.upstream_callback, methods=["GET"]))
+        return routes
 
     async def authorize(self, request: Request) -> Response:
         try:
             params = request.query_params if request.method == "GET" else await _read_form(request)
-            authorization = self._validate_authorization_request(params, self.resource(request))
+            authorization, client = await self._validate_authorization_request(params, self.resource(request))
         except OAuthRequestError as error:
             return _oauth_error(error.error, error.description)
 
@@ -207,6 +255,16 @@ class OAuthCompatibilityServer:
             "code_challenge_method": "S256",
             "state": params.get("state"),
         }
+        if self.upstream is not None:
+            if request.method != "GET":
+                return _oauth_error("invalid_request", "Sign in with your Magic Hour account to authorize")
+            pending = {
+                **authorization,
+                "state": params.get("state"),
+                "refresh_allowed": self._client_may_refresh(client),
+            }
+            location = self.upstream.begin_login(issuer=self.issuer(request), pending=pending)
+            return RedirectResponse(location, status_code=303, headers={"Cache-Control": "no-store"})
         if request.method == "GET":
             return _authorization_page(page_params)
 
@@ -243,13 +301,91 @@ class OAuthCompatibilityServer:
                 redirect_uri=authorization["redirect_uri"],
                 code_challenge=authorization["code_challenge"],
                 resource=authorization["resource"],
+                scope=authorization["scope"] or "",
+                refresh_allowed=self._client_may_refresh(client),
             )
         except OAuthCapacityError:
             return _authorization_failure(page_params, "code_capacity", "Server is busy. Try again.", 503)
-        location = _add_query(authorization["redirect_uri"], {"code": code, "state": params.get("state")})
+        return self._authorization_redirect(request, authorization["redirect_uri"], code, params.get("state"))
+
+    def _authorization_redirect(
+        self, request: Request, redirect_uri: str, code: str, state: str | None
+    ) -> RedirectResponse:
+        # RFC 9207: every authorization response names the issuer so clients
+        # such as ChatGPT can use one stable callback for every connection.
+        location = _add_query(redirect_uri, {"code": code, "state": state, "iss": self.issuer(request)})
         return RedirectResponse(
             location, status_code=303, headers={"Cache-Control": "no-store"},
             background=self._code_event("oauth_authorization_code_issued", code),
+        )
+
+    def _client_may_refresh(self, client: ClientMetadata | None) -> bool:
+        if not self.refresh_tokens_enabled:
+            return False
+        # DCR is stateless (no registry), so registered/pre-shared clients
+        # decide by advertising refresh support at the token endpoint; CIMD
+        # clients declare it in their metadata document.
+        return client is None or client.supports_refresh
+
+    async def upstream_callback(self, request: Request) -> Response:
+        """Magic Hour sends the user back here after account login (broker mode)."""
+        assert self.upstream is not None
+        query = request.query_params
+        try:
+            pending, verifier = self.upstream.open_pending_login(query.get("state", ""))
+        except UpstreamOAuthError as error:
+            # Without a valid pending state there is no trustworthy client
+            # redirect to send the user back to, so fail in place.
+            return _oauth_error(error.error, error.description)
+
+        redirect_uri = str(pending.get("redirect_uri", ""))
+        client_state = pending.get("state")
+        client_state = client_state if isinstance(client_state, str) else None
+        if not _valid_server_url(redirect_uri):
+            return _oauth_error("invalid_request", "Login session is malformed")
+
+        if query.get("error") or not query.get("code"):
+            return self._authorization_error_redirect(
+                request, redirect_uri, "access_denied", "Magic Hour login was cancelled or denied", client_state
+            )
+        try:
+            credential = await self.upstream.exchange_code(
+                issuer=self.issuer(request), code=query["code"], verifier=verifier
+            )
+        except UpstreamOAuthError as error:
+            return self._authorization_error_redirect(request, redirect_uri, error.error, error.description, client_state)
+
+        try:
+            code = self.codes.issue(
+                api_key=credential,
+                client_id=str(pending.get("client_id", "")),
+                redirect_uri=redirect_uri,
+                code_challenge=str(pending.get("code_challenge", "")),
+                resource=pending.get("resource") if isinstance(pending.get("resource"), str) else None,
+                scope=str(pending.get("scope") or ""),
+                refresh_allowed=bool(pending.get("refresh_allowed")),
+            )
+        except OAuthCapacityError:
+            return self._authorization_error_redirect(
+                request, redirect_uri, "temporarily_unavailable", "Server is busy. Try again.", client_state
+            )
+        return self._authorization_redirect(request, redirect_uri, code, client_state)
+
+    def _authorization_error_redirect(
+        self, request: Request, redirect_uri: str, error: str, description: str, state: str | None
+    ) -> RedirectResponse:
+        location = _add_query(
+            redirect_uri,
+            {"error": error, "error_description": description, "state": state, "iss": self.issuer(request)},
+        )
+        return RedirectResponse(
+            location,
+            status_code=303,
+            headers={"Cache-Control": "no-store"},
+            background=BackgroundTask(
+                analytics.capture, "oauth_request_failed",
+                {"stage": "upstream_login", "reason": error, "http_status": 303},
+            ),
         )
 
     async def register(self, request: Request) -> Response:
@@ -266,12 +402,17 @@ class OAuthCompatibilityServer:
             )
             return _registration_error(error.error, error.description)
 
+        requested_grants = metadata.get("grant_types", ["authorization_code"])
+        grant_types = ["authorization_code"]
+        if self.refresh_tokens_enabled and "refresh_token" in requested_grants:
+            grant_types.append("refresh_token")
         return JSONResponse(
             {
                 "client_id": secrets.token_urlsafe(32),
+                "client_id_issued_at": int(time()),
                 "redirect_uris": redirect_uris,
                 "token_endpoint_auth_method": "none",
-                "grant_types": ["authorization_code"],
+                "grant_types": grant_types,
                 "response_types": ["code"],
             },
             status_code=201,
@@ -284,11 +425,14 @@ class OAuthCompatibilityServer:
         except OAuthRequestError as error:
             return _token_rejection("malformed_form", error.error, error.description)
 
-        if params.get("grant_type") != "authorization_code":
+        grant_type = params.get("grant_type")
+        if grant_type == "refresh_token":
+            return self._refresh_access_token(request, params)
+        if grant_type != "authorization_code":
             return _token_rejection(
                 "unsupported_grant_type",
                 "unsupported_grant_type",
-                "grant_type must be authorization_code",
+                "grant_type must be authorization_code or refresh_token",
             )
 
         code = params.get("code", "")
@@ -345,13 +489,86 @@ class OAuthCompatibilityServer:
             )
 
         return JSONResponse(
-            {"access_token": authorization.api_key, "token_type": "Bearer"},
+            self._token_response(
+                credential=authorization.api_key,
+                client_id=authorization.client_id,
+                resource=authorization.resource or self.resource(request),
+                scope=authorization.scope,
+                refresh_allowed=authorization.refresh_allowed,
+            ),
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
             background=self._code_event("oauth_connection_completed", code),
         )
 
+    def _token_response(
+        self,
+        *,
+        credential: str,
+        client_id: str,
+        resource: str | None,
+        scope: str,
+        refresh_allowed: bool,
+    ) -> dict[str, Any]:
+        if self.token_codec is None:
+            # Legacy mode: the credential itself is the bearer token. Enable
+            # MCP_OAUTH_TOKEN_SECRET to stop exposing it to OAuth clients.
+            legacy: dict[str, Any] = {"access_token": credential, "token_type": "Bearer"}
+            if scope:
+                legacy["scope"] = scope
+            return legacy
+        issued = self.token_codec.issue(
+            credential=credential, client_id=client_id, resource=resource, scope=scope
+        )
+        response: dict[str, Any] = {
+            "access_token": issued.access_token,
+            "token_type": "Bearer",
+            "expires_in": issued.expires_in,
+        }
+        if scope:
+            response["scope"] = scope
+        if refresh_allowed:
+            response["refresh_token"] = issued.refresh_token
+        return response
+
+    def _refresh_access_token(self, request: Request, params: Mapping[str, str]) -> Response:
+        if self.token_codec is None:
+            return _token_rejection(
+                "unsupported_grant_type",
+                "unsupported_grant_type",
+                "refresh_token grant is not enabled",
+            )
+        try:
+            claims = self.token_codec.open_refresh_token(params.get("refresh_token", ""))
+        except TokenError:
+            return _token_rejection("refresh_token_invalid", "invalid_grant", "Refresh token is invalid or expired")
+        if not hmac.compare_digest(params.get("client_id", ""), claims.client_id):
+            return _token_rejection("client_mismatch", "invalid_grant", "Refresh token does not match client")
+        token_resource = params.get("resource")
+        if token_resource and claims.resource and not _same_resource(token_resource, claims.resource):
+            return _token_rejection("resource_mismatch", "invalid_grant", "Refresh token does not match resource")
+        requested_scope = params.get("scope")
+        if requested_scope is not None:
+            granted = set(claims.scope.split())
+            if not set(requested_scope.split()) <= granted:
+                return _token_rejection("scope_exceeded", "invalid_scope", "Requested scope exceeds the granted scope")
+        # Rotation: every refresh mints a new pair; the previous refresh token
+        # stays valid until its own expiry because the store is stateless.
+        return JSONResponse(
+            self._token_response(
+                credential=claims.credential,
+                client_id=claims.client_id,
+                resource=claims.resource or self.resource(request),
+                scope=claims.scope,
+                refresh_allowed=True,
+            ),
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
+
     async def authorization_server_metadata(self, request: Request) -> Response:
         issuer = self.issuer(request)
+        grant_types = ["authorization_code"]
+        if self.refresh_tokens_enabled:
+            grant_types.append("refresh_token")
         return JSONResponse(
             {
                 "issuer": issuer,
@@ -359,9 +576,14 @@ class OAuthCompatibilityServer:
                 "token_endpoint": f"{issuer}/token",
                 "registration_endpoint": f"{issuer}/register",
                 "response_types_supported": ["code"],
-                "grant_types_supported": ["authorization_code"],
+                "grant_types_supported": grant_types,
                 "code_challenge_methods_supported": ["S256"],
                 "token_endpoint_auth_methods_supported": ["none"],
+                "scopes_supported": list(SUPPORTED_SCOPES),
+                # RFC 9207 issuer identification: unlocks ChatGPT's stable callback.
+                "authorization_response_iss_parameter_supported": True,
+                # Client ID Metadata Documents: ChatGPT's preferred client model.
+                "client_id_metadata_document_supported": True,
             }
         )
 
@@ -381,31 +603,51 @@ class OAuthCompatibilityServer:
     def resource(self, request: Request) -> str:
         return (self.settings.resource_url or self.issuer(request)).rstrip("/")
 
-    def _validate_authorization_request(
+    async def _validate_authorization_request(
         self,
         params: Mapping[str, str],
         expected_resource: str,
-    ) -> dict[str, str | None]:
+    ) -> tuple[dict[str, str | None], ClientMetadata | None]:
         client_id = params.get("client_id", "")
         redirect_uri = params.get("redirect_uri", "")
         challenge = params.get("code_challenge", "")
         resource = params.get("resource")
+        scope = params.get("scope")
 
         if params.get("response_type") != "code":
             raise OAuthRequestError("unsupported_response_type", "response_type must be code")
-        if not _valid_client_id(client_id) or not _allowed_redirect_uri(redirect_uri):
+        if not _valid_client_id(client_id):
             raise OAuthRequestError("invalid_request", "Invalid client or redirect_uri")
+
+        client: ClientMetadata | None = None
+        if is_client_id_url(client_id):
+            try:
+                client = await self.client_metadata.resolve(client_id)
+            except CIMDError as error:
+                logger.warning("cimd_rejected reason=%s", error)
+                raise OAuthRequestError("invalid_client", "Client metadata document is invalid") from None
+            if not client.allows_redirect(redirect_uri):
+                raise OAuthRequestError("invalid_request", "Invalid client or redirect_uri")
+        elif not _allowed_redirect_uri(redirect_uri):
+            raise OAuthRequestError("invalid_request", "Invalid client or redirect_uri")
+
         if params.get("code_challenge_method") != "S256" or not CHALLENGE_RE.fullmatch(challenge):
             raise OAuthRequestError("invalid_request", "PKCE S256 code_challenge is required")
         if resource and not _same_resource(resource, expected_resource):
             raise OAuthRequestError("invalid_target", "Unknown resource")
+        if scope is not None:
+            scope = _validate_scope(scope)
 
-        return {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "code_challenge": challenge,
-            "resource": resource,
-        }
+        return (
+            {
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "code_challenge": challenge,
+                "resource": resource,
+                "scope": scope,
+            },
+            client,
+        )
 
     async def _validate_api_key(self, api_key: str) -> bool:
         async with httpx.AsyncClient(base_url=self.settings.api_base_url, timeout=10.0) as client:
@@ -674,6 +916,16 @@ def _valid_client_id(client_id: str) -> bool:
     return 0 < len(client_id) <= 512 and client_id.isascii() and all(
         0x20 < ord(character) < 0x7F for character in client_id
     )
+
+
+def _validate_scope(scope: str) -> str:
+    requested = scope.split(" ") if scope else []
+    if len(requested) > 10 or any(not SCOPE_RE.fullmatch(item) for item in requested):
+        raise OAuthRequestError("invalid_scope", "Malformed scope")
+    unknown = [item for item in requested if item not in SUPPORTED_SCOPES]
+    if unknown:
+        raise OAuthRequestError("invalid_scope", "Requested scope is not supported")
+    return " ".join(dict.fromkeys(requested))
 
 
 def _authorization_page(
