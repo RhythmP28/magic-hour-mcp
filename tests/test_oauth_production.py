@@ -142,6 +142,8 @@ class ClientMetadataDocumentTests(unittest.IsolatedAsyncioTestCase):
             "https://chatgpt.com/oauth/client.json?x=1",
             "https://chatgpt.com/",
             "https://chatgpt.com:8443/oauth/client.json",
+            "https://chatgpt.com:invalid/oauth/client.json",
+            "https://[chatgpt.com/oauth/client.json",
         ):
             with self.subTest(client_id=client_id), self.assertRaises(CIMDError):
                 await resolver.resolve(client_id)
@@ -349,6 +351,47 @@ class ProductionOAuthFlowTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get("/authorize", params=self.authorization_params(scope="mcp admin"))
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], "invalid_scope")
+
+    async def test_refresh_narrows_scopes_in_both_tokens(self):
+        authorized = await self.authorize()
+        code = parse_qs(urlsplit(authorized.headers["location"]).query)["code"][0]
+        first = (await self.exchange(code)).json()
+        narrowed = await self.client.post("/token", data={
+            "grant_type": "refresh_token", "refresh_token": first["refresh_token"],
+            "client_id": CHATGPT_CIMD, "scope": "mcp",
+        })
+        self.assertEqual(narrowed.status_code, 200)
+        body = narrowed.json()
+        self.assertEqual(body["scope"], "mcp")
+        self.assertEqual(self.codec.open_access_token(body["access_token"]).scope, "mcp")
+        self.assertEqual(self.codec.open_refresh_token(body["refresh_token"]).scope, "mcp")
+        widened = await self.client.post("/token", data={
+            "grant_type": "refresh_token", "refresh_token": body["refresh_token"],
+            "client_id": CHATGPT_CIMD, "scope": "mcp offline_access",
+        })
+        self.assertEqual(widened.json()["error"], "invalid_scope")
+
+    async def test_malformed_token_parameters_fail_without_consuming_code(self):
+        authorized = await self.authorize()
+        code = parse_qs(urlsplit(authorized.headers["location"]).query)["code"][0]
+        for overrides in ({"client_id": "\u2603"}, {"redirect_uri": "https://example.com/\u2603"}, {"resource": "https://[broken"}):
+            with self.subTest(overrides=overrides):
+                rejected = await self.exchange(code, **overrides)
+                self.assertEqual(rejected.status_code, 400)
+                self.assertEqual(rejected.json()["error"], "invalid_grant")
+        accepted = await self.exchange(code)
+        self.assertEqual(accepted.status_code, 200)
+        refresh = await self.client.post("/token", data={
+            "grant_type": "refresh_token", "refresh_token": accepted.json()["refresh_token"],
+            "client_id": "\u2603",
+        })
+        self.assertEqual(refresh.status_code, 400)
+
+    async def test_malformed_cimd_url_is_an_oauth_error(self):
+        for client_id in ("https://chatgpt.com:invalid/client.json", "https://[chatgpt.com/client.json"):
+            response = await self.authorize(client_id=client_id)
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()["error"], "invalid_client")
 
     async def test_legacy_mode_without_secret_keeps_raw_key_tokens_and_no_refresh(self):
         legacy = OAuthCompatibilityServer(

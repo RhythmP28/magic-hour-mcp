@@ -87,10 +87,14 @@ class ClientMetadataResolver:
     def validate_client_id(self, client_id: str) -> None:
         if len(client_id) > MAX_CLIENT_ID_LENGTH or not client_id.isascii():
             raise CIMDError("client_id URL is too long")
-        parts = urlsplit(client_id)
+        try:
+            parts = urlsplit(client_id)
+            port = parts.port
+        except ValueError:
+            raise CIMDError("client_id URL is malformed") from None
         if parts.scheme != "https" or not parts.hostname:
             raise CIMDError("client_id must be an https URL")
-        if parts.username or parts.password or parts.query or parts.fragment or parts.port:
+        if parts.username or parts.password or parts.query or parts.fragment or port is not None:
             raise CIMDError("client_id URL must not contain credentials, query, fragment, or port")
         if not parts.path or parts.path == "/":
             raise CIMDError("client_id URL must include a document path")
@@ -180,7 +184,11 @@ def parse_client_metadata(client_id: str, document: Any) -> ClientMetadata:
 
 
 def _https_redirect(uri: str) -> bool:
-    parts = urlsplit(uri)
+    try:
+        parts = urlsplit(uri)
+        parts.port
+    except ValueError:
+        return False
     return (
         parts.scheme == "https"
         and bool(parts.netloc)

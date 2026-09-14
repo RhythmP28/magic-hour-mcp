@@ -10,6 +10,7 @@ from starlette.applications import Starlette
 
 from mcp_magichour.oauth_compat import (
     CHATGPT_STABLE_REDIRECT_URI,
+    LOGIN_COOKIE,
     OAuthCompatibilityServer,
     OAuthSettings,
     _pkce_challenge,
@@ -132,6 +133,9 @@ class BrokerFlowTests(unittest.IsolatedAsyncioTestCase):
     async def start_login(self):
         response = await self.client.get("/authorize", params=self.authorization_params())
         self.assertEqual(response.status_code, 303)
+        cookie = response.headers["set-cookie"]
+        for attribute in ("Secure", "HttpOnly", "SameSite=lax", "Path=/", "Max-Age=600"):
+            self.assertIn(attribute, cookie)
         location = urlsplit(response.headers["location"])
         self.assertEqual(f"{location.scheme}://{location.netloc}{location.path}", UPSTREAM_AUTHORIZE)
         query = parse_qs(location.query)
@@ -149,6 +153,7 @@ class BrokerFlowTests(unittest.IsolatedAsyncioTestCase):
             "/oauth/callback", params={"code": "magic-hour-code", "state": upstream_query["state"][0]}
         )
         self.assertEqual(callback.status_code, 303)
+        self.assertNotIn(LOGIN_COOKIE, self.client.cookies)
         location = urlsplit(callback.headers["location"])
         self.assertEqual(f"{location.scheme}://{location.netloc}{location.path}", CHATGPT_STABLE_REDIRECT_URI)
         query = parse_qs(location.query)
@@ -192,10 +197,28 @@ class BrokerFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.magic_hour.token_requests, [])
 
         self.magic_hour.next_status = 400
+        upstream_query = await self.start_login()
         failed = await self.client.get(
             "/oauth/callback", params={"code": "bad", "state": upstream_query["state"][0]}
         )
         self.assertEqual(parse_qs(urlsplit(failed.headers["location"]).query)["error"], ["access_denied"])
+
+    async def test_callback_requires_the_initiating_browser_and_clears_cookie(self):
+        query = await self.start_login()
+        callback_params = {"code": "magic-hour-code", "state": query["state"][0]}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url=ISSUER) as other:
+            for cookies in ({}, {LOGIN_COOKIE: "attacker-nonce"}):
+                other.cookies.clear()
+                other.cookies.update(cookies)
+                rejected = await other.get("/oauth/callback", params=callback_params)
+                self.assertEqual(rejected.status_code, 400)
+                self.assertNotIn("location", rejected.headers)
+        self.assertEqual(self.magic_hour.token_requests, [])
+        accepted = await self.client.get("/oauth/callback", params=callback_params)
+        self.assertEqual(accepted.status_code, 303)
+        replay = await self.client.get("/oauth/callback", params=callback_params)
+        self.assertEqual(replay.status_code, 400)
+        self.assertEqual(len(self.magic_hour.token_requests), 1)
 
     async def test_forged_or_expired_state_cannot_complete_a_login(self):
         forged = await self.client.get("/oauth/callback", params={"code": "x", "state": "mhmcp_v1.forged"})

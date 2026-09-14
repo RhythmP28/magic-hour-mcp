@@ -32,10 +32,11 @@ from .cimd import CIMDError, ClientMetadata, ClientMetadataResolver, allowed_cim
 from .oauth_tokens import SealedTokenCodec, TokenError
 from .openapi_auth import AuthError, current_authorization_header
 from .posthog_client import OAuthCodeEvent, analytics
-from .upstream_oauth import UpstreamOAuthBroker, UpstreamOAuthError, UpstreamOAuthSettings
+from .upstream_oauth import PENDING_LOGIN_TTL_SECONDS, UpstreamOAuthBroker, UpstreamOAuthError, UpstreamOAuthSettings
 
 
 CODE_TTL_SECONDS = 300
+LOGIN_COOKIE = "__Host-mh-oauth-login"
 MAX_FORM_BYTES = 16 * 1024
 MAX_REGISTRATION_BYTES = 16 * 1024
 MAX_PENDING_CODES = 1_000
@@ -258,13 +259,20 @@ class OAuthCompatibilityServer:
         if self.upstream is not None:
             if request.method != "GET":
                 return _oauth_error("invalid_request", "Sign in with your Magic Hour account to authorize")
+            browser_nonce = secrets.token_urlsafe(32)
             pending = {
                 **authorization,
+                "browser_nonce_hash": hashlib.sha256(browser_nonce.encode()).hexdigest(),
                 "state": params.get("state"),
                 "refresh_allowed": self._client_may_refresh(client),
             }
             location = self.upstream.begin_login(issuer=self.issuer(request), pending=pending)
-            return RedirectResponse(location, status_code=303, headers={"Cache-Control": "no-store"})
+            response = RedirectResponse(location, status_code=303, headers={"Cache-Control": "no-store"})
+            response.set_cookie(
+                LOGIN_COOKIE, browser_nonce, max_age=PENDING_LOGIN_TTL_SECONDS,
+                secure=True, httponly=True, samesite="lax", path="/",
+            )
+            return response
         if request.method == "GET":
             return _authorization_page(page_params)
 
@@ -314,10 +322,13 @@ class OAuthCompatibilityServer:
         # RFC 9207: every authorization response names the issuer so clients
         # such as ChatGPT can use one stable callback for every connection.
         location = _add_query(redirect_uri, {"code": code, "state": state, "iss": self.issuer(request)})
-        return RedirectResponse(
+        response = RedirectResponse(
             location, status_code=303, headers={"Cache-Control": "no-store"},
             background=self._code_event("oauth_authorization_code_issued", code),
         )
+        if self.upstream is not None:
+            response.delete_cookie(LOGIN_COOKIE, secure=True, httponly=True, samesite="lax")
+        return response
 
     def _client_may_refresh(self, client: ClientMetadata | None) -> bool:
         if not self.refresh_tokens_enabled:
@@ -337,6 +348,13 @@ class OAuthCompatibilityServer:
             # Without a valid pending state there is no trustworthy client
             # redirect to send the user back to, so fail in place.
             return _oauth_error(error.error, error.description)
+
+        browser_nonce = request.cookies.get(LOGIN_COOKIE, "")
+        expected_hash = pending.get("browser_nonce_hash")
+        if not browser_nonce or not isinstance(expected_hash, str) or not _constant_time_equal(
+            hashlib.sha256(browser_nonce.encode()).hexdigest(), expected_hash
+        ):
+            return _oauth_error("invalid_request", "Login must complete in the browser that started it")
 
         redirect_uri = str(pending.get("redirect_uri", ""))
         client_state = pending.get("state")
@@ -378,7 +396,7 @@ class OAuthCompatibilityServer:
             redirect_uri,
             {"error": error, "error_description": description, "state": state, "iss": self.issuer(request)},
         )
-        return RedirectResponse(
+        response = RedirectResponse(
             location,
             status_code=303,
             headers={"Cache-Control": "no-store"},
@@ -387,6 +405,8 @@ class OAuthCompatibilityServer:
                 {"stage": "upstream_login", "reason": error, "http_status": 303},
             ),
         )
+        response.delete_cookie(LOGIN_COOKIE, secure=True, httponly=True, samesite="lax")
+        return response
 
     async def register(self, request: Request) -> Response:
         metadata: dict[str, Any] | None = None
@@ -445,13 +465,13 @@ class OAuthCompatibilityServer:
                 background=self._code_event("oauth_authorization_code_lookup_missed", code),
             )
 
-        if not hmac.compare_digest(params.get("client_id", ""), authorization.client_id):
+        if not _constant_time_equal(params.get("client_id", ""), authorization.client_id):
             return _token_rejection(
                 "client_mismatch",
                 "invalid_grant",
                 "Authorization code does not match client",
             )
-        if not hmac.compare_digest(params.get("redirect_uri", ""), authorization.redirect_uri):
+        if not _constant_time_equal(params.get("redirect_uri", ""), authorization.redirect_uri):
             return _token_rejection(
                 "redirect_uri_mismatch",
                 "invalid_grant",
@@ -541,7 +561,7 @@ class OAuthCompatibilityServer:
             claims = self.token_codec.open_refresh_token(params.get("refresh_token", ""))
         except TokenError:
             return _token_rejection("refresh_token_invalid", "invalid_grant", "Refresh token is invalid or expired")
-        if not hmac.compare_digest(params.get("client_id", ""), claims.client_id):
+        if not _constant_time_equal(params.get("client_id", ""), claims.client_id):
             return _token_rejection("client_mismatch", "invalid_grant", "Refresh token does not match client")
         token_resource = params.get("resource")
         if token_resource and claims.resource and not _same_resource(token_resource, claims.resource):
@@ -558,7 +578,7 @@ class OAuthCompatibilityServer:
                 credential=claims.credential,
                 client_id=claims.client_id,
                 resource=claims.resource or self.resource(request),
-                scope=claims.scope,
+                scope=claims.scope if requested_scope is None else " ".join(dict.fromkeys(requested_scope.split())),
                 refresh_allowed=True,
             ),
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
@@ -1165,8 +1185,11 @@ def _add_query(uri: str, values: Mapping[str, str | None]) -> str:
 
 
 def _same_resource(left: str, right: str) -> bool:
-    left_parts = urlsplit(left)
-    right_parts = urlsplit(right)
+    try:
+        left_parts = urlsplit(left)
+        right_parts = urlsplit(right)
+    except ValueError:
+        return False
     return (
         left_parts.scheme.lower(),
         left_parts.netloc.lower(),
@@ -1178,6 +1201,10 @@ def _same_resource(left: str, right: str) -> bool:
         right_parts.path.rstrip("/"),
         right_parts.query,
     )
+
+
+def _constant_time_equal(left: str, right: str) -> bool:
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
 
 def _valid_server_url(uri: str) -> bool:

@@ -12,10 +12,10 @@ Hour's own authorization server:
             -> this server exchanges it            (MAGIC_HOUR_OAUTH_TOKEN_URL)
             -> mints our sealed tokens, redirects back to ChatGPT with a code
 
-Everything this server needs to remember between the two redirects is sealed
-into the ``state`` value handed to Magic Hour, so the flow is stateless across
-server instances and immune to state forgery (only this server's secret can
-mint a valid pending-login state).
+The pending request is sealed into the ``state`` value handed to Magic Hour.
+The OAuth route also binds it to a host-only browser cookie and checks that
+binding before exchanging the upstream code. Instances sharing the token
+secret can complete the callback without a process-local login session.
 
 What Magic Hour's platform has to provide for this mode (outside this repo):
 
