@@ -614,7 +614,11 @@ class MCPBearerChallengeMiddleware:
                     async def replay_body() -> dict[str, Any]:
                         nonlocal sent
                         if sent:
-                            return {"type": "http.disconnect"}
+                            # Fall through to the real client stream; returning
+                            # http.disconnect here makes the streamable-HTTP
+                            # transport abort the SSE response before any event
+                            # is written.
+                            return await receive()
                         sent = True
                         return {"type": "http.request", "body": body, "more_body": False}
 
@@ -649,7 +653,10 @@ class MCPBearerChallengeMiddleware:
 class _OAuthListedTool(Tool):
     def to_mcp_tool(self, **overrides: Any):
         tool = super().to_mcp_tool(**overrides)
-        tool.securitySchemes = OAUTH_SECURITY_SCHEMES
+        # Only SDK versions whose Tool model declares securitySchemes accept
+        # the attribute; assigning it elsewhere raises and kills tools/list.
+        if "securitySchemes" in type(tool).model_fields:
+            tool.securitySchemes = OAUTH_SECURITY_SCHEMES
         return tool
 
 

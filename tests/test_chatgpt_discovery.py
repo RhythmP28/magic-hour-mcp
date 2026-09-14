@@ -6,7 +6,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+import mcp.types as mcp_types
 
+from mcp_magichour.oauth_compat import OAUTH_SECURITY_SCHEMES
 from mcp_magichour.openapi_server import (
     GLAMA_VERIFICATION_PATH,
     MCP_APP_ASSET_PATH,
@@ -194,9 +196,13 @@ class ChatGPTDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
         tools = self.result(listed)["tools"]
         self.assertGreater(len(tools), 0)
-        self.assertTrue(
-            all(tool["securitySchemes"] == [{"type": "oauth2", "scopes": []}] for tool in tools)
-        )
+        if "securitySchemes" in mcp_types.Tool.model_fields:
+            self.assertTrue(
+                all(tool["securitySchemes"] == OAUTH_SECURITY_SCHEMES for tool in tools)
+            )
+        else:
+            # SDK versions without the field must still list tools cleanly.
+            self.assertTrue(all("securitySchemes" not in tool for tool in tools))
         ping = next(tool for tool in tools if tool["name"] == "ping")
         self.assertNotIn("ui", ping.get("_meta", {}))
         for name in ("wait_for_video_project", "wait_for_image_project", "wait_for_audio_project"):
