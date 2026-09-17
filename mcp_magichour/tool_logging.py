@@ -68,4 +68,24 @@ class ToolCallLoggingMiddleware(Middleware):
             )
             raise
         logger.info("tool_call_completed name=%s is_error=%s", name, result.is_error)
+        if name in {"wait_for_image_project", "wait_for_video_project", "wait_for_audio_project"}:
+            project = result.structured_content
+            if isinstance(project, dict):
+                status = project.get("status")
+                if status not in {"draft", "queued", "rendering", "complete", "error", "canceled", "timeout"}:
+                    status = "unknown"
+                downloads = project.get("downloads")
+                error = project.get("error")
+                error_code = error.get("code") if isinstance(error, dict) else None
+                if not isinstance(error_code, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", error_code):
+                    error_code = "unknown" if error else "none"
+                logger.info(
+                    "media_project_result name=%s status=%s download_count=%s inline_media_count=%s has_error=%s error_code=%s",
+                    name,
+                    status,
+                    len(downloads) if isinstance(downloads, list) else 0,
+                    sum(item.type in {"image", "audio"} for item in result.content),
+                    bool(error),
+                    error_code,
+                )
         return result

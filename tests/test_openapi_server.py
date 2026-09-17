@@ -154,6 +154,7 @@ class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
                     max_bytes_per_download=1024,
                 )
                 jsonschema.validate(result.structured_content, tool.output_schema)
+                self.assertEqual(result.is_error, project["status"] != "complete")
 
     async def test_primary_workflows_advertise_output_schemas(self):
         names = {
@@ -251,6 +252,10 @@ class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
             ValueError, "download_url must use https://videos.magichour.ai"
         ):
             await _fetch_media_bytes("https://example.test/output.mp4", "video/", 1024)
+        with self.assertRaisesRegex(ValueError, "download_url must use"):
+            await _fetch_media_bytes("https://magichour.ai.evil.test/output.mp4", "video/", 1024)
+        with self.assertRaisesRegex(ValueError, "download_url must use"):
+            await _fetch_media_bytes("http://videos.magichour.ai/output.mp4", "video/", 1024)
 
     async def test_video_wait_accepts_shared_inline_options(self):
         tool = next(

@@ -177,6 +177,15 @@ def main(base: str) -> int:
         templates = [t for t in tools if (t.get("_meta") or {}).get("ui")]
         if templates:
             record("PASS", f"{len(templates)} tools reference a UI template")
+            missing_alias = [
+                t["name"] for t in templates
+                if (t.get("_meta") or {}).get("openai/outputTemplate")
+                != ((t.get("_meta") or {}).get("ui") or {}).get("resourceUri")
+            ]
+            if missing_alias:
+                record("FAIL", f"UI tools missing openai/outputTemplate alias (ChatGPT will not render the widget): {missing_alias}")
+            else:
+                record("PASS", "every UI tool carries the openai/outputTemplate alias for ChatGPT")
 
     status, _, message = json_rpc(
         base, {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ping", "arguments": {}}}
@@ -204,6 +213,11 @@ def main(base: str) -> int:
             record("PASS", f"UI template {resource['uri']} declares widget domain {domain}")
         else:
             record("FAIL", f"UI template {resource['uri']} has no widget domain (required for submission)")
+        widget_csp = meta.get("openai/widgetCSP") or {}
+        if widget_csp.get("connect_domains") is not None and widget_csp.get("resource_domains") is not None:
+            record("PASS", f"UI template {resource['uri']} declares openai/widgetCSP for ChatGPT")
+        else:
+            record("FAIL", f"UI template {resource['uri']} has no openai/widgetCSP (ChatGPT blocks widget media without it)")
 
     # Modern MCP has no initialize handshake. Exercise its real HTTP header
     # and per-request envelope; a legacy-only server must fail this check.

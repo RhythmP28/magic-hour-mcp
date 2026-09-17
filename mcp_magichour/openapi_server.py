@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 import os
 from base64 import b64encode
@@ -38,6 +39,8 @@ from .project_result_app import (
     MCP_APP_ASSET_PATH,
     MCP_APP_DIST_PATH,
     MCP_APP_MEDIA_ORIGIN,
+    MCP_APP_MEDIA_ORIGIN_WILDCARD,
+    is_allowed_media_host,
     MCP_APP_MIME_TYPE,
     MCP_APP_ORIGIN,
     MCP_APP_SERVER_ORIGIN,
@@ -181,14 +184,29 @@ def register_custom_tools(mcp: FastMCP) -> None:
         app=AppConfig(
             csp=ResourceCSP(
                 connect_domains=[MCP_APP_SERVER_ORIGIN, MCP_APP_ORIGIN],
-                resource_domains=[MCP_APP_ORIGIN, MCP_APP_MEDIA_ORIGIN],
+                resource_domains=[
+                    MCP_APP_ORIGIN,
+                    MCP_APP_MEDIA_ORIGIN,
+                    MCP_APP_MEDIA_ORIGIN_WILDCARD,
+                ],
             ),
             domain=MCP_APP_WIDGET_DOMAIN,
             prefers_border=True,
         ),
-        # fastmcp emits the MCP Apps form as `_meta.ui.domain`; ChatGPT's Apps SDK
-        # reads the same origin from this alias. Both are merged into one `_meta`.
-        meta={"openai/widgetDomain": MCP_APP_WIDGET_DOMAIN},
+        # fastmcp emits the MCP Apps form under `_meta.ui`; ChatGPT's Apps SDK
+        # reads its own `openai/*` aliases. Both are merged into one `_meta`.
+        meta={
+            "openai/widgetDomain": MCP_APP_WIDGET_DOMAIN,
+            "openai/widgetPrefersBorder": True,
+            "openai/widgetCSP": {
+                "connect_domains": [MCP_APP_SERVER_ORIGIN, MCP_APP_ORIGIN],
+                "resource_domains": [
+                    MCP_APP_ORIGIN,
+                    MCP_APP_MEDIA_ORIGIN,
+                    MCP_APP_MEDIA_ORIGIN_WILDCARD,
+                ],
+            },
+        },
     )
     def mcp_app_view() -> str:
         return read_mcp_app_html()
@@ -212,6 +230,9 @@ def register_custom_tools(mcp: FastMCP) -> None:
             f"{SIGNED_DOWNLOAD_GUIDANCE} {read_only_guidance} Does not start a generation or charge credits."
         ),
         app=AppConfig(resource_uri=MCP_APP_VIEW_URI),
+        # ChatGPT only renders the result widget when the tool itself carries
+        # the Apps SDK alias for the template URI.
+        meta={"openai/outputTemplate": MCP_APP_VIEW_URI},
     )
     async def wait_for_video_project(
         id: str,
@@ -239,6 +260,9 @@ def register_custom_tools(mcp: FastMCP) -> None:
             f"clients. {SIGNED_DOWNLOAD_GUIDANCE} {read_only_guidance} Does not start a generation or charge credits."
         ),
         app=AppConfig(resource_uri=MCP_APP_VIEW_URI),
+        # ChatGPT only renders the result widget when the tool itself carries
+        # the Apps SDK alias for the template URI.
+        meta={"openai/outputTemplate": MCP_APP_VIEW_URI},
     )
     async def wait_for_image_project(
         id: str,
@@ -268,6 +292,9 @@ def register_custom_tools(mcp: FastMCP) -> None:
             f"clients. {SIGNED_DOWNLOAD_GUIDANCE} {read_only_guidance} Does not start a generation or charge credits."
         ),
         app=AppConfig(resource_uri=MCP_APP_VIEW_URI),
+        # ChatGPT only renders the result widget when the tool itself carries
+        # the Apps SDK alias for the template URI.
+        meta={"openai/outputTemplate": MCP_APP_VIEW_URI},
     )
     async def wait_for_audio_project(
         id: str,
@@ -383,11 +410,10 @@ async def _fetch_media_bytes(
     if max_bytes <= 0:
         raise ValueError("max_bytes must be greater than 0.")
     parsed_url = urlparse(download_url)
-    if (
-        parsed_url.scheme != "https"
-        or parsed_url.hostname != urlparse(MCP_APP_MEDIA_ORIGIN).hostname
-    ):
-        raise ValueError(f"download_url must use {MCP_APP_MEDIA_ORIGIN}.")
+    if parsed_url.scheme != "https" or not is_allowed_media_host(parsed_url.hostname):
+        raise ValueError(
+            f"download_url must use {MCP_APP_MEDIA_ORIGIN} or another https magichour.ai origin."
+        )
 
     async with httpx.AsyncClient(timeout=API_TIMEOUT, follow_redirects=True) as client:
         async with client.stream("GET", download_url) as response:
@@ -447,6 +473,12 @@ async def _project_to_tool_result(
                     max_bytes=max_bytes_per_download,
                 )
             except Exception as exc:
+                logging.getLogger("uvicorn.error.mcp_tools").warning(
+                    "media_inline_download_failed project_type=%s error_type=%s http_status=%s",
+                    project_type,
+                    type(exc).__name__,
+                    exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None,
+                )
                 analytics.capture(
                     "media_inline_download_failed",
                     {
@@ -486,7 +518,11 @@ async def _project_to_tool_result(
 
     structured_content = _project_structured_content_for_agent(project)
     structured_content["project_type"] = project_type
-    return ToolResult(content=content, structured_content=structured_content)
+    return ToolResult(
+        content=content,
+        structured_content=structured_content,
+        is_error=status in {"error", "canceled", "timeout"},
+    )
 
 
 def _can_inline_media(

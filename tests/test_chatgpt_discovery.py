@@ -276,6 +276,7 @@ class ChatGPTDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         for name in ("wait_for_video_project", "wait_for_image_project", "wait_for_audio_project"):
             tool = next(tool for tool in tools if tool["name"] == name)
             self.assertEqual(tool["_meta"]["ui"]["resourceUri"], MCP_APP_VIEW_URI)
+            self.assertEqual(tool["_meta"]["openai/outputTemplate"], MCP_APP_VIEW_URI)
 
         listed_resources = await client.post(
             "/",
@@ -304,12 +305,28 @@ class ChatGPTDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             view_content["_meta"]["ui"]["csp"],
             {
                 "connectDomains": [MCP_APP_SERVER_ORIGIN, MCP_APP_ORIGIN],
-                "resourceDomains": [MCP_APP_ORIGIN, MCP_APP_MEDIA_ORIGIN],
+                "resourceDomains": [
+                    MCP_APP_ORIGIN,
+                    MCP_APP_MEDIA_ORIGIN,
+                    "https://*.magichour.ai",
+                ],
             },
         )
         self.assertTrue(view_content["_meta"]["ui"]["prefersBorder"])
         self.assertEqual(view_content["_meta"]["ui"]["domain"], MCP_APP_WIDGET_DOMAIN)
         self.assertEqual(view_content["_meta"]["openai/widgetDomain"], MCP_APP_WIDGET_DOMAIN)
+        self.assertTrue(view_content["_meta"]["openai/widgetPrefersBorder"])
+        self.assertEqual(
+            view_content["_meta"]["openai/widgetCSP"],
+            {
+                "connect_domains": [MCP_APP_SERVER_ORIGIN, MCP_APP_ORIGIN],
+                "resource_domains": [
+                    MCP_APP_ORIGIN,
+                    MCP_APP_MEDIA_ORIGIN,
+                    "https://*.magichour.ai",
+                ],
+            },
+        )
         self.assertTrue(view_content["text"].startswith("<!DOCTYPE html>"))
         self.assertIn(
             f'<meta http-equiv="Content-Security-Policy" content="{escape(MCP_APP_VIEW_CSP, quote=False)}">',

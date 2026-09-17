@@ -19,12 +19,18 @@ ORIGIN = "https://mcp.example"
 class ModernProtocolTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.requests = []
+        self.project_status = "complete"
 
         def upstream(request):
             self.requests.append(request)
             if request.method == "POST" and request.url.path == "/v1/ai-image-generator":
                 return httpx.Response(200, json={"id": "test-image-1", "credits_charged": 1})
             if request.method == "GET" and request.url.path == "/v1/image-projects/test-image-1":
+                if self.project_status == "error":
+                    return httpx.Response(200, json={
+                        "id": "test-image-1", "status": "error", "credits_charged": 0,
+                        "downloads": [], "error": {"code": "render_failed", "message": "Renderer failed"},
+                    })
                 return httpx.Response(200, json={
                     "id": "test-image-1", "status": "complete", "credits_charged": 1,
                     "downloads": [{"url": "https://videos.magichour.ai/test-dog.png"}],
@@ -101,6 +107,7 @@ class ModernProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(tool["annotations"][hint], bool)
         wait_tool = next(tool for tool in tools if tool["name"] == "wait_for_image_project")
         self.assertEqual(wait_tool["_meta"]["ui"]["resourceUri"], MCP_APP_VIEW_URI)
+        self.assertEqual(wait_tool["_meta"]["openai/outputTemplate"], MCP_APP_VIEW_URI)
 
         status, payload = await self.rpc("tools/call", {"name": "ping", "arguments": {}})
         self.assertEqual(status, 200, payload)
@@ -131,6 +138,20 @@ class ModernProtocolTests(unittest.IsolatedAsyncioTestCase):
     async def test_modern_unauthenticated_and_invalid_calls_do_not_reach_api(self):
         async with self.app.router.lifespan_context(self.app):
             await self.assert_modern_unauthenticated_and_invalid_calls_do_not_reach_api()
+
+    async def test_failed_render_is_a_tool_error_with_upstream_details(self):
+        self.project_status = "error"
+        async with self.app.router.lifespan_context(self.app):
+            status, payload = await self.rpc("tools/call", {
+                "name": "wait_for_image_project", "arguments": {"id": "test-image-1"},
+            })
+        self.assertEqual(status, 200, payload)
+        result = payload["result"]
+        self.assertTrue(result["isError"])
+        self.assertIn("Renderer failed", result["content"][0]["text"])
+        self.assertEqual(result["structuredContent"]["error"]["code"], "render_failed")
+        self.assertEqual(result["structuredContent"]["credits_charged"], 0)
+        self.assertEqual([r.method for r in self.requests], ["GET"])
 
     async def assert_modern_unauthenticated_and_invalid_calls_do_not_reach_api(self):
         status, payload = await self.rpc("tools/call", {"name": "ping", "arguments": {}}, authorized=False)

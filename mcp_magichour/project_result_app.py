@@ -14,6 +14,18 @@ MCP_APP_ORIGIN = os.getenv(
 # and `_meta["openai/widgetDomain"]` (ChatGPT Apps SDK) on the result resource.
 MCP_APP_WIDGET_DOMAIN = os.getenv("MCP_APP_WIDGET_DOMAIN", MCP_APP_ORIGIN).rstrip("/")
 MCP_APP_MEDIA_ORIGIN = "https://videos.magichour.ai"
+# Magic Hour serves signed downloads from first-party subdomains; accept any of
+# them so image/audio CDNs other than videos.* keep inline media and the widget
+# preview working.
+MCP_APP_MEDIA_HOST_SUFFIX = "magichour.ai"
+MCP_APP_MEDIA_ORIGIN_WILDCARD = f"https://*.{MCP_APP_MEDIA_HOST_SUFFIX}"
+
+
+def is_allowed_media_host(hostname: str | None) -> bool:
+    return hostname is not None and (
+        hostname == MCP_APP_MEDIA_HOST_SUFFIX
+        or hostname.endswith("." + MCP_APP_MEDIA_HOST_SUFFIX)
+    )
 MCP_APP_DIST_PATH = Path(__file__).with_name("static") / "project-result"
 MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
 _MCP_APP_CSP_PLACEHOLDER = "__MCP_APP_CSP__"
@@ -22,8 +34,8 @@ MCP_APP_VIEW_CSP = (
     f"connect-src {MCP_APP_SERVER_ORIGIN} {MCP_APP_ORIGIN}; "
     "frame-ancestors https://chatgpt.com https://claude.ai; "
     "form-action 'none'; "
-    f"img-src {MCP_APP_MEDIA_ORIGIN}; "
-    f"media-src {MCP_APP_MEDIA_ORIGIN}; "
+    f"img-src {MCP_APP_MEDIA_ORIGIN} {MCP_APP_MEDIA_ORIGIN_WILDCARD}; "
+    f"media-src {MCP_APP_MEDIA_ORIGIN} {MCP_APP_MEDIA_ORIGIN_WILDCARD}; "
     f"script-src {MCP_APP_ORIGIN}; "
     f"style-src {MCP_APP_ORIGIN}; "
     "base-uri 'none'"

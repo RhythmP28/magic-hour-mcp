@@ -35,7 +35,8 @@ function safeMediaUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "videos.magichour.ai" ? url.href : null;
+    const allowedHost = url.hostname === "magichour.ai" || url.hostname.endsWith(".magichour.ai");
+    return url.protocol === "https:" && allowedHost ? url.href : null;
   } catch {
     return null;
   }
