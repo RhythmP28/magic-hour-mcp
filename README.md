@@ -117,7 +117,7 @@ Check a deployment's discovery, annotations, auth challenges, and widget domain:
 python scripts/verify_chatgpt_readiness.py https://mcp.magichour.ai
 ```
 
-The check exercises both modern and legacy protocols (22 checks when domain
+The check exercises both modern and legacy protocols (24 checks when domain
 verification is configured). It does not replace the full ChatGPT connection test.
 
 ## Test with MCP Inspector

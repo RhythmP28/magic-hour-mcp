@@ -10,7 +10,7 @@ readiness script), plus the follow-up fixes described below. Official repo: gith
 
 - The server speaks MCP JSON-RPC at the root path `/` (`/mcp` returns 404) and now implements what ChatGPT's plugin platform expects from an OAuth authorization server: RFC 9207 `iss`, the stable ChatGPT callback, CIMD, sealed access/refresh tokens, scopes.
 - Robert's "ChatGPT never scans the tools" blocker was two bugs on his branch, not an OpenAI-side problem; a fixed test deployment completed DCR, OAuth and the scan and listed all 44 tools in a ChatGPT Business workspace.
-- Local and test deployments are ready (102 tests; `scripts/verify_chatgpt_readiness.py` 22/22). A private Business-workspace app is ready pending one human re-test of this exact build.
+- Local and test deployments are ready (110 tests; `scripts/verify_chatgpt_readiness.py` 24/24). A private Business-workspace app is ready pending one human re-test of this exact build.
 - Public Plugin Directory submission is not ready: it needs Magic Hour account OAuth (Part B), shared authorization-code storage, refresh replay protection and upstream renewal, policy decisions, and the portal prerequisites.
 - Users still log in by pasting an API key by default; OpenAI's plugin guidelines forbid that for the public listing.
 
@@ -202,7 +202,7 @@ Protocol compatibility follow-up:
 - `tests/test_modern_protocol.py` covers modern discovery, all 44 tool descriptors,
   sealed-token ping, image creation and polling with a mock API, widget loading,
   auth challenges, invalid arguments, and rejection of unknown protocol versions.
-  The existing legacy tests also pass. The live preview passes 22 checks including
+  The existing legacy tests also pass. The live preview passes 24 checks including
   the modern HTTP headers and per-request metadata envelope.
 - The user confirmed ping and account retrieval in ChatGPT before this upgrade.
   Their subsequent generation attempt exposed the protocol mismatch. A human
@@ -218,7 +218,7 @@ and [OpenAI tool metadata](https://developers.openai.com/plugins/reference).
   identification, stable callback, refresh rotation, scope handling, bearer
   unwrapping, broker round trip and failure paths, annotations, submission-file
   agreement, discovery, widget CSP, and the challenge endpoint.
-- `scripts/verify_chatgpt_readiness.py <base-url>` reports 22/22 PASS against the
+- `scripts/verify_chatgpt_readiness.py <base-url>` reports 24/24 PASS against the
   test deployment: protected-resource and authorization-server metadata, `iss`
   support, CIMD, refresh grant, DCR with the stable callback, challenge token,
   `initialize`, `tools/list` (44 tools, all with the three hints and
@@ -344,7 +344,7 @@ Ping and account retrieval were confirmed by the user before the protocol upgrad
 Repeat the flow and complete image generation against this new build.
 
 1. Deploy this branch with `MCP_OAUTH_ISSUER_URL`, `MCP_OAUTH_RESOURCE_URL`,
-   `MCP_OAUTH_TOKEN_SECRET`, `MCP_APP_ORIGIN` set. Run the readiness script (22/22).
+   `MCP_OAUTH_TOKEN_SECRET`, `MCP_APP_ORIGIN` set. Run the readiness script (24/24).
 2. In ChatGPT (Business workspace, admin): Settings > Apps & Connectors (or the
    workspace admin's Connectors page) > Create / Add app > MCP server URL
    `https://mcp.magichour.ai/` (with the trailing slash, root path), authentication
@@ -463,7 +463,7 @@ Portal steps, in order:
 
 | Level | Verdict | What is missing |
 |---|---|---|
-| Local / test deployment | Ready | Nothing: 102 tests pass, readiness script 22/22. |
+| Local / test deployment | Ready | Nothing: 110 tests pass, readiness script 24/24. |
 | ChatGPT private app (Business workspace) | Ready, pending one human re-test against this build | Run the flow above once with CIMD + sealed tokens; ping/account worked in ChatGPT before the protocol upgrade; the upgraded build passes the scripted flow with a mock API, and needs a human generation retry. |
 | Public Plugin Directory submission | Not ready | Part B (account OAuth), shared code storage, refresh replay protection and upstream renewal, policy decisions, portal prerequisites (verified org, public URLs, reviewer credentials, 5/3 test cases, recording, logo, 706 px screenshots). |
 
