@@ -299,6 +299,7 @@ Recommended
 | `MCP_OAUTH_ACCESS_TOKEN_TTL` | No | `28800` | Access token lifetime in seconds. |
 | `MCP_OAUTH_REFRESH_TOKEN_TTL` | No | `2592000` | Refresh token lifetime in seconds; old refresh tokens stay valid this long after rotation. |
 | `MCP_OAUTH_CIMD_ALLOWED_HOSTS` | No | `chatgpt.com` always included | Comma-separated extra hosts whose CIMD documents may be used as `client_id`. |
+| `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | Yes for multi-instance deployments | unset = process-local code store | Upstash-style Redis REST endpoint for the shared authorization-code store (Vercel KV's `KV_REST_API_URL`/`KV_REST_API_TOKEN` also work). Needs `MCP_OAUTH_TOKEN_SECRET`; payloads are AES-GCM sealed and codes are single-use via `GETDEL`. |
 | `MAGIC_HOUR_API_BASE_URL` | No | `https://api.magichour.ai` | Upstream API for tools and API-key validation. |
 | `MAGIC_HOUR_OAUTH_VALIDATION_PATH` | No | `/v1/ai-image-generator` | Endpoint POSTed with `{}` to validate a pasted API key (400 = valid). |
 | `MAGIC_HOUR_OPENAPI_PATH` | No | `docs/openapi.json` | Spec the tools are generated from. |
@@ -413,7 +414,9 @@ Prerequisites checklist (all outside this repo unless noted):
 
 - [ ] Part B live and `MAGIC_HOUR_OAUTH_*` set, so the login is Magic Hour's own page,
       not the API-key form (OpenAI's guidelines forbid collecting API keys).
-- [ ] Upstream draft PR #86 (Upstash Redis authorization-code store) merged and deployed.
+- [x] Shared authorization-code store implemented in this repo (`oauth_code_store.py`,
+      supersedes upstream draft PR #86). Still to do at deploy time: provision Upstash
+      Redis (or Vercel KV) and set `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`.
 - [ ] Verified Magic Hour organization on https://platform.openai.com with Apps
       Management write permission for the person submitting. Do not submit under a
       personal or unrelated organization.
@@ -466,16 +469,18 @@ Portal steps, in order:
 
 ## Known limitations & risks
 
-1. Authorization-code store is process-local (`AuthorizationCodeStore` in
-   `oauth_compat.py`, a dict with a 300 s TTL). On Vercel with more than one instance,
-   `/authorize` and `/token` can land on different instances and return
-   `invalid_grant` intermittently; PostHog `oauth_authorization_code_lookup_missed`
-   with a different `code_store_id` is the signature. Upstream draft PR #86 (Upstash
-   Redis store) is the intended fix and should be merged before public launch.
-   The [PR author describes it as a deferred reliability option](https://github.com/magichourhq/magic-hour-mcp/pull/86),
-   with synthetic reproduction and no established production incident. Treating
-   shared storage as a public-launch gate here is our deployment recommendation.
-   Adapting PR #86 also requires preserving the new scope and refresh fields.
+1. Resolved when Redis is configured: the authorization-code store defaults to
+   process-local (`AuthorizationCodeStore` in `oauth_code_store.py`, a dict with a
+   300 s TTL), which on multi-instance Vercel returns `invalid_grant`
+   intermittently when `/authorize` and `/token` land on different instances
+   (PostHog `oauth_authorization_code_lookup_missed` with a different
+   `code_store_id` is the signature). Setting `UPSTASH_REDIS_REST_URL` +
+   `UPSTASH_REDIS_REST_TOKEN` (or Vercel KV's `KV_REST_API_URL`/`KV_REST_API_TOKEN`)
+   switches to `RedisAuthorizationCodeStore`: codes are keyed by SHA-256, sealed
+   with AES-GCM derived from `MCP_OAUTH_TOKEN_SECRET`, expired by Redis TTL, and
+   consumed atomically with `GETDEL` (single use across instances; covered by
+   `tests/test_oauth_code_store.py`, including a cross-instance token exchange).
+   Provision an Upstash Redis database and set both variables before public launch.
    Sealed tokens themselves are stateless and unaffected.
 2. Refresh tokens rotate but are not revoked: the previous refresh token stays valid
    until its own `exp` (30 days by default). Every refresh starts another TTL, so

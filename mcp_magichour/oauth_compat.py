@@ -29,18 +29,25 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import BaseRoute, Mount, Route
 
 from .cimd import CIMDError, ClientMetadata, ClientMetadataResolver, allowed_cimd_hosts_from_env, is_client_id_url
+from .oauth_code_store import (
+    CODE_TTL_SECONDS,
+    MAX_CODES_PER_API_KEY,
+    MAX_PENDING_CODES,
+    AuthorizationCode,
+    AuthorizationCodeStore,
+    OAuthCapacityError,
+    RedisAuthorizationCodeStore,
+    authorization_code_store_from_env,
+)
 from .oauth_tokens import SealedTokenCodec, TokenError
 from .openapi_auth import AuthError, current_authorization_header
 from .posthog_client import OAuthCodeEvent, analytics
 from .upstream_oauth import PENDING_LOGIN_TTL_SECONDS, UpstreamOAuthBroker, UpstreamOAuthError, UpstreamOAuthSettings
 
 
-CODE_TTL_SECONDS = 300
 LOGIN_COOKIE = "__Host-mh-oauth-login"
 MAX_FORM_BYTES = 16 * 1024
 MAX_REGISTRATION_BYTES = 16 * 1024
-MAX_PENDING_CODES = 1_000
-MAX_CODES_PER_API_KEY = 3
 MAX_CONCURRENT_VALIDATIONS = 10
 API_KEY_VERIFICATION_ERROR = (
     "We couldn't verify this API key. Check that you copied the full key and try again."
@@ -66,93 +73,6 @@ SUPPORTED_SCOPES = (MCP_SCOPE, OFFLINE_ACCESS_SCOPE)
 ApiKeyValidator = Callable[[str], Awaitable[bool]]
 logger = logging.getLogger("uvicorn.error.mcp_oauth")
 OAUTH_SECURITY_SCHEMES = [{"type": "oauth2", "scopes": []}]
-
-
-class OAuthCapacityError(Exception):
-    pass
-
-
-@dataclass(frozen=True)
-class AuthorizationCode:
-    api_key: str
-    client_id: str
-    redirect_uri: str
-    code_challenge: str
-    resource: str | None
-    expires_at: float
-    scope: str = ""
-    refresh_allowed: bool = False
-
-
-class AuthorizationCodeStore:
-    """Small process-local store for short-lived, single-use codes."""
-
-    def __init__(self, ttl_seconds: int = CODE_TTL_SECONDS) -> None:
-        self.ttl_seconds = ttl_seconds
-        self.instance_id = secrets.token_hex(16)
-        self._codes: dict[str, AuthorizationCode] = {}
-        self._lock = Lock()
-
-    def issue(
-        self,
-        *,
-        api_key: str,
-        client_id: str,
-        redirect_uri: str,
-        code_challenge: str,
-        resource: str | None,
-        scope: str = "",
-        refresh_allowed: bool = False,
-    ) -> str:
-        code = secrets.token_urlsafe(32)
-        now = monotonic()
-        authorization_code = AuthorizationCode(
-            api_key=api_key,
-            client_id=client_id,
-            redirect_uri=redirect_uri,
-            code_challenge=code_challenge,
-            resource=resource,
-            expires_at=now + self.ttl_seconds,
-            scope=scope,
-            refresh_allowed=refresh_allowed,
-        )
-        with self._lock:
-            self._remove_expired(now)
-            if sum(value.api_key == api_key for value in self._codes.values()) >= MAX_CODES_PER_API_KEY:
-                raise OAuthCapacityError
-            if len(self._codes) >= MAX_PENDING_CODES:
-                raise OAuthCapacityError
-            self._codes[code] = authorization_code
-        return code
-
-    def consume(self, code: str) -> AuthorizationCode | None:
-        now = monotonic()
-        with self._lock:
-            authorization_code = self._codes.pop(code, None)
-            self._remove_expired(now)
-        if authorization_code is None or authorization_code.expires_at <= now:
-            return None
-        return authorization_code
-
-    def get(self, code: str) -> AuthorizationCode | None:
-        now = monotonic()
-        with self._lock:
-            self._remove_expired(now)
-            return self._codes.get(code)
-
-    def has_capacity(self, api_key: str) -> bool:
-        now = monotonic()
-        with self._lock:
-            self._remove_expired(now)
-            return (
-                len(self._codes) < MAX_PENDING_CODES
-                and sum(value.api_key == api_key for value in self._codes.values()) < MAX_CODES_PER_API_KEY
-            )
-
-    def _remove_expired(self, now: float) -> None:
-        for code, value in list(self._codes.items()):
-            if value.expires_at <= now:
-                del self._codes[code]
 
 
 @dataclass(frozen=True)
@@ -181,14 +101,14 @@ class OAuthCompatibilityServer:
         *,
         settings: OAuthSettings | None = None,
         api_key_validator: ApiKeyValidator | None = None,
-        code_store: AuthorizationCodeStore | None = None,
+        code_store: AuthorizationCodeStore | RedisAuthorizationCodeStore | None = None,
         token_codec: SealedTokenCodec | None | bool = False,
         client_metadata_resolver: ClientMetadataResolver | None = None,
         upstream: UpstreamOAuthBroker | None | bool = False,
     ) -> None:
         self.settings = settings or OAuthSettings.from_env()
         _validate_settings(self.settings)
-        self.codes = code_store or AuthorizationCodeStore()
+        self.codes = code_store or authorization_code_store_from_env()
         self.validate_api_key = api_key_validator or self._validate_api_key
         self._validation_slots = asyncio.Semaphore(MAX_CONCURRENT_VALIDATIONS)
         # ``False`` (the default) means "read MCP_OAUTH_TOKEN_SECRET from the
@@ -281,7 +201,7 @@ class OAuthCompatibilityServer:
             return _authorization_failure(page_params, "api_key_missing", "API key is required.", 400)
         if len(api_key) > 512 or any(character.isspace() for character in api_key):
             return _authorization_failure(page_params, "api_key_rejected", API_KEY_VERIFICATION_ERROR, 401)
-        if not self.codes.has_capacity(api_key):
+        if not await self.codes.has_capacity(api_key):
             return _authorization_failure(page_params, "code_capacity", "Server is busy. Try again.", 503)
 
         try:
@@ -303,7 +223,7 @@ class OAuthCompatibilityServer:
             return _authorization_failure(page_params, "api_key_rejected", API_KEY_VERIFICATION_ERROR, 401)
 
         try:
-            code = self.codes.issue(
+            code = await self.codes.issue(
                 api_key=api_key,
                 client_id=authorization["client_id"],
                 redirect_uri=authorization["redirect_uri"],
@@ -374,7 +294,7 @@ class OAuthCompatibilityServer:
             return self._authorization_error_redirect(request, redirect_uri, error.error, error.description, client_state)
 
         try:
-            code = self.codes.issue(
+            code = await self.codes.issue(
                 api_key=credential,
                 client_id=str(pending.get("client_id", "")),
                 redirect_uri=redirect_uri,
@@ -456,7 +376,7 @@ class OAuthCompatibilityServer:
             )
 
         code = params.get("code", "")
-        authorization = self.codes.get(code)
+        authorization = await self.codes.get(code)
         if authorization is None:
             return _token_rejection(
                 "code_invalid_or_expired",
@@ -501,7 +421,7 @@ class OAuthCompatibilityServer:
         ):
             return _token_rejection("pkce_failed", "invalid_grant", "PKCE verification failed")
 
-        if self.codes.consume(code) is not authorization:
+        if await self.codes.consume(code) != authorization:
             return _token_rejection(
                 "code_already_consumed",
                 "invalid_grant",
