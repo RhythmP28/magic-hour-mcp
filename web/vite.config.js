@@ -1,7 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const deploymentHost = process.env.VERCEL_URL || process.env.VITE_VERCEL_URL || "mcp.magichour.ai";
+const deploymentHost =
+  process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+  process.env.VERCEL_URL ||
+  process.env.VITE_VERCEL_URL ||
+  "mcp.magichour.ai";
 
 export default defineConfig({
   base: `https://${deploymentHost}/app/project-result-assets/`,
