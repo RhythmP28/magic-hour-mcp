@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
 import mimetypes
@@ -133,7 +134,17 @@ PROJECT_RESULT_SCHEMA = {
 def load_openapi_spec(
     path: str | os.PathLike[str] = DEFAULT_OPENAPI_PATH,
 ) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as spec_file:
+    spec_path = Path(path)
+    # A gzipped spec keeps size-limited deployment uploads small; the ``.gz``
+    # sibling is used automatically when the plain file is absent.
+    if spec_path.suffix != ".gz" and not spec_path.exists():
+        gz_sibling = spec_path.with_name(spec_path.name + ".gz")
+        if gz_sibling.exists():
+            spec_path = gz_sibling
+    if spec_path.suffix == ".gz":
+        with gzip.open(spec_path, "rt", encoding="utf-8") as spec_file:
+            return json.load(spec_file)
+    with spec_path.open("r", encoding="utf-8") as spec_file:
         return json.load(spec_file)
 
 

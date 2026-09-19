@@ -40,6 +40,22 @@ READ_ONLY_TOOLS = {
 DESTRUCTIVE_TOOLS = {f"{asset}_projects_delete" for asset in ("image", "video", "audio")}
 
 
+class GzippedSpecTests(unittest.TestCase):
+    def test_loads_gzipped_spec_directly_and_as_missing_file_fallback(self):
+        import gzip
+        import tempfile
+
+        from mcp_magichour.openapi_server import load_openapi_spec
+
+        spec = {"openapi": "3.1.0", "paths": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            gz_path = Path(tmp) / "openapi.json.gz"
+            with gzip.open(gz_path, "wt", encoding="utf-8") as handle:
+                json.dump(spec, handle)
+            self.assertEqual(load_openapi_spec(gz_path), spec)
+            self.assertEqual(load_openapi_spec(Path(tmp) / "openapi.json"), spec)
+
+
 class OpenApiServerTests(unittest.IsolatedAsyncioTestCase):
     async def test_favicon_is_public_and_serves_packaged_asset(self):
         favicon_path = Path(__file__).parent.parent / "mcp_magichour" / "favicon.ico"
